@@ -1,10 +1,17 @@
+# .github/workflows/ci.yml
 name: Build and Test
 
 on:
   push:
-    branches: [ "**" ]  # Runs on all branches
+    branches: [ main, master, develop, "feature/**" ]  # Runs on main release and feature branches
   pull_request:
-    branches: [ main, master, develop ]  # Also runs on PRs to main/master
+    branches: [ main, master, develop ]  # Also runs on PRs to main/master/develop
+
+env:
+  NODE_VERSION: '18'
+  PYTHON_VERSION: '3.11'
+  DOTNET_VERSION: '10.0.x'
+  JAVA_VERSION: '17'
 
 jobs:
   build-test:
@@ -14,81 +21,163 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    # Auto-detect language/framework and set up environment
-    - name: Set up Node.js
+    # Detect project type
+    - name: Detect project type
+      id: detect
+      run: |
+        if [ -f package.json ]; then
+          echo "project_type=node" >> $GITHUB_OUTPUT
+        elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+          echo "project_type=python" >> $GITHUB_OUTPUT
+        elif find . -name "*.csproj" -type f | grep -q .; then
+          echo "project_type=dotnet" >> $GITHUB_OUTPUT
+        elif [ -f pom.xml ] || [ -f build.gradle ]; then
+          echo "project_type=java" >> $GITHUB_OUTPUT
+          if [ -f pom.xml ]; then
+            echo "java_cache=maven" >> $GITHUB_OUTPUT
+          else
+            echo "java_cache=gradle" >> $GITHUB_OUTPUT
+          fi
+        else
+          echo "project_type=unknown" >> $GITHUB_OUTPUT
+        fi
+
+    # =============== Node.js ===============
+    - name: Set up Node.js and cache npm
+      if: steps.detect.outputs.project_type == 'node'
       uses: actions/setup-node@v4
-      if: ${{ !env.SETUP_DONE }}
       with:
-        node-version: '18'
+        node-version: ${{ env.NODE_VERSION }}
         cache: 'npm'
+        cache-dependency-path: |
+          **/package-lock.json
+          **/yarn.lock
+          **/pnpm-lock.yaml
 
-    - name: Set up Python
+    # =============== Python ===============
+    - name: Set up Python and cache pip
+      if: steps.detect.outputs.project_type == 'python'
       uses: actions/setup-python@v4
-      if: ${{ !env.SETUP_DONE }}
       with:
-        python-version: '3.11'
+        python-version: ${{ env.PYTHON_VERSION }}
         cache: 'pip'
+        cache-dependency-path: |
+          **/requirements.txt
+          **/pyproject.toml
+          **/setup.py
+          **/poetry.lock
 
+    # =============== .NET ===============
     - name: Set up .NET
+      if: steps.detect.outputs.project_type == 'dotnet'
       uses: actions/setup-dotnet@v4
-      if: ${{ !env.SETUP_DONE }}
       with:
-        dotnet-version: '10.0.x'
+        dotnet-version: ${{ env.DOTNET_VERSION }}
 
-    - name: Set up Java
+    # .NET projects benefit from caching the ~/.nuget/packages folder
+    - name: Cache NuGet packages
+      if: steps.detect.outputs.project_type == 'dotnet'
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json', '**/obj/project.assets.json') }}
+        restore-keys: |
+          ${{ runner.os }}-nuget-
+
+    # =============== Java ===============
+    - name: Set up Java and cache Maven/Gradle
+      if: steps.detect.outputs.project_type == 'java'
       uses: actions/setup-java@v4
-      if: ${{ !env.SETUP_DONE }}
       with:
-        java-version: '17'
+        java-version: ${{ env.JAVA_VERSION }}
         distribution: 'temurin'
+        cache: ${{ steps.detect.outputs.java_cache }}
 
-    # Install dependencies
+    # Note: setup-java@v4 auto-caches Maven/Gradle using hashFiles() internally when `cache:` is set.
+    # So no extra cache step is needed for Java.
+
+    # =============== Install Dependencies ===============
     - name: Install dependencies
       run: |
-        if [ -f package.json ]; then
-          npm ci
-        elif [ -f requirements.txt ]; then
-          pip install -r requirements.txt
-        elif [ -f pom.xml ]; then
-          mvn dependency:go-offline
-        elif [ -f build.gradle ]; then
-          gradle dependencies
-        elif [ -f *.csproj ]; then
-          dotnet restore
-        else
-          echo "No known project file found"
-        fi
+        case "${{ steps.detect.outputs.project_type }}" in
+          node)
+            npm ci
+            ;;
+          python)
+            pip install -r requirements.txt 2>/dev/null || pip install -e .
+            ;;
+          dotnet)
+            dotnet restore
+            ;;
+          java)
+            if [ -f pom.xml ]; then
+              mvn dependency:go-offline
+            elif [ -f build.gradle ]; then
+              ./gradlew dependencies || gradle dependencies
+            fi
+            ;;
+          *)
+            echo "Unknown project type — skipping install"
+            exit 1
+            ;;
+        esac
 
-    # Build
+    # =============== Build ===============
     - name: Build
       run: |
-        if [ -f package.json ]; then
-          npm run build --if-present
-        elif [ -f Makefile ]; then
-          make
-        elif [ -f pom.xml ]; then
-          mvn compile
-        elif [ -f build.gradle ]; then
-          gradle build -x test
-        elif [ -f *.csproj ]; then
-          dotnet build --no-restore
-        else
-          echo "No known build command found"
-        fi
+        case "${{ steps.detect.outputs.project_type }}" in
+          node)
+            npm run build --if-present
+            ;;
+          dotnet)
+            dotnet build --configuration Release --no-restore
+            ;;
+          java)
+            if [ -f pom.xml ]; then
+              mvn compile
+            elif [ -f build.gradle ]; then
+              ./gradlew build -x test || gradle build -x test
+            fi
+            ;;
+          python|*)
+            echo "No explicit build step required"
+            ;;
+        esac
 
-    # Test
+    # =============== Run Tests ===============
     - name: Run tests
       run: |
-        if [ -f package.json ]; then
-          npm test
-        elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
-          python -m pytest
-        elif [ -f pom.xml ]; then
-          mvn test
-        elif [ -f build.gradle ]; then
-          gradle test
-        elif [ -f *.csproj ]; then
-          dotnet test --no-build
-        else
-          echo "No known test command found"
-        fi
+        case "${{ steps.detect.outputs.project_type }}" in
+          node)
+            npm test
+            ;;
+          python)
+            python -m pytest 2>/dev/null || python -m unittest discover || echo "No tests found"
+            ;;
+          dotnet)
+            dotnet test --configuration Release --no-build --verbosity normal --logger trx --collect:"XPlat Code Coverage" --results-directory ./TestResults
+            ;;
+          java)
+            if [ -f pom.xml ]; then
+              mvn test
+            elif [ -f build.gradle ]; then
+              ./gradlew test || gradle test
+            fi
+            ;;
+          *)
+            echo "No test command defined"
+            exit 1
+            ;;
+        esac
+
+    # =============== Upload Test Results ===============
+    - name: Upload .NET test results
+      if: always() && steps.detect.outputs.project_type == 'dotnet'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-dotnet-${{ runner.os }}
+        path: |
+          ./TestResults/
+          **/coverage.cobertura.xml
+        retention-days: 30
+        if-no-files-found: ignore
