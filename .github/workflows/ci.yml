@@ -1,0 +1,94 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ "**" ]  # Runs on all branches
+  pull_request:
+    branches: [ main, master, develop ]  # Also runs on PRs to main/master
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # Auto-detect language/framework and set up environment
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      if: ${{ !env.SETUP_DONE }}
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      if: ${{ !env.SETUP_DONE }}
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      if: ${{ !env.SETUP_DONE }}
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      if: ${{ !env.SETUP_DONE }}
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    # Install dependencies
+    - name: Install dependencies
+      run: |
+        if [ -f package.json ]; then
+          npm ci
+        elif [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        elif [ -f pom.xml ]; then
+          mvn dependency:go-offline
+        elif [ -f build.gradle ]; then
+          gradle dependencies
+        elif [ -f *.csproj ]; then
+          dotnet restore
+        else
+          echo "No known project file found"
+        fi
+
+    # Build
+    - name: Build
+      run: |
+        if [ -f package.json ]; then
+          npm run build --if-present
+        elif [ -f Makefile ]; then
+          make
+        elif [ -f pom.xml ]; then
+          mvn compile
+        elif [ -f build.gradle ]; then
+          gradle build -x test
+        elif [ -f *.csproj ]; then
+          dotnet build --no-restore
+        else
+          echo "No known build command found"
+        fi
+
+    # Test
+    - name: Run tests
+      run: |
+        if [ -f package.json ]; then
+          npm test
+        elif [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -d tests ]; then
+          python -m pytest
+        elif [ -f pom.xml ]; then
+          mvn test
+        elif [ -f build.gradle ]; then
+          gradle test
+        elif [ -f *.csproj ]; then
+          dotnet test --no-build
+        else
+          echo "No known test command found"
+        fi
