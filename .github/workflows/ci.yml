@@ -29,8 +29,7 @@ jobs:
         echo "📋 Installing actionlint for workflow validation..."
         mkdir -p /tmp/actionlint
         cd /tmp/actionlint
-        wget -q https://github.com/rhysd/actionlint/releases/download/v1.6.27/actionlint_linux_amd64.zip
-        unzip -q actionlint_linux_amd64.zip
+        curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
         chmod +x ./actionlint
         echo "✅ Actionlint installed"
         
