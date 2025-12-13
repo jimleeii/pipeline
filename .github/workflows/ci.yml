@@ -414,5 +414,5 @@ jobs:
           **/test-results/*.xml
           **/surefire-reports/*.xml
           **/TestResults/**/*.trx
-        reporter: java-junit
+        reporter: ${{ steps.detect.outputs.project_type == 'dotnet' && 'dotnet-trx' || steps.detect.outputs.project_type == 'java' && 'java-junit' || 'java-junit' }}
         fail-on-error: false
