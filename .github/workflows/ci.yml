@@ -4,6 +4,7 @@ name: Build and Test
 on:
   push:
     branches: [ main, master, develop, "feature/**" ]  # Runs on main release and feature branches
+    tags: [ 'v*.*.*' ]  # Ensure CI runs for version tags too
   pull_request:
     branches: [ main, master, develop ]  # Also runs on PRs to main/master/develop
   workflow_dispatch:  # Allow manual triggering
