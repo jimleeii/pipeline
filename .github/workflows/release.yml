@@ -146,7 +146,7 @@ jobs:
           fi
           
           # Convert array to JSON array format
-          LANGUAGES_JSON=$(printf '%s\n' "${LANGUAGES[@]}" | jq -R . | jq -s .)
+          LANGUAGES_JSON=$(printf '%s\n' "${LANGUAGES[@]}" | jq -R . | jq -sc .)
           {
             echo "languages=$LANGUAGES_JSON"
             echo "has-languages=true"
