@@ -98,11 +98,6 @@ jobs:
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      NODE_PRESENT: ${{ hashFiles('**/package.json') != '' }}
-      PYTHON_PRESENT: ${{ hashFiles('**/pyproject.toml') != '' || hashFiles('**/setup.py') != '' }}
-      DOTNET_PRESENT: ${{ hashFiles('**/*.sln') != '' || hashFiles('**/*.slnx') != '' || hashFiles('**/*.csproj') != '' }}
-      JAVA_PRESENT: ${{ hashFiles('**/*.gradle*') != '' || hashFiles('**/gradle-wrapper.properties') != '' || hashFiles('buildSrc/**/Versions.kt') != '' || hashFiles('buildSrc/**/Dependencies.kt') != '' || hashFiles('gradle/*.versions.toml') != '' || hashFiles('**/versions.properties') != '' || hashFiles('**/pom.xml') != '' }}
-      DOCKERFILE_PRESENT: ${{ hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -112,6 +107,48 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Needed for git operations
+
+      - name: Detect project types
+        id: detect
+        run: |
+          # Align detection with ci.yml so both workflows evaluate project types the same way
+          NODE_PRESENT=false
+          PYTHON_PRESENT=false
+          DOTNET_PRESENT=false
+          JAVA_PRESENT=false
+          DOCKERFILE_PRESENT=false
+
+          if [ -f package.json ]; then
+            NODE_PRESENT=true
+          fi
+
+          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+            PYTHON_PRESENT=true
+          fi
+
+          if find . -name "*.csproj" -type f | grep -q .; then
+            DOTNET_PRESENT=true
+          fi
+
+          if [ -f pom.xml ] || [ -f build.gradle ]; then
+            JAVA_PRESENT=true
+          fi
+
+          if [ -f Dockerfile ]; then
+            DOCKERFILE_PRESENT=true
+          fi
+
+          echo "NODE_PRESENT=$NODE_PRESENT" >> $GITHUB_ENV
+          echo "PYTHON_PRESENT=$PYTHON_PRESENT" >> $GITHUB_ENV
+          echo "DOTNET_PRESENT=$DOTNET_PRESENT" >> $GITHUB_ENV
+          echo "JAVA_PRESENT=$JAVA_PRESENT" >> $GITHUB_ENV
+          echo "DOCKERFILE_PRESENT=$DOCKERFILE_PRESENT" >> $GITHUB_ENV
+
+          echo "node_present=$NODE_PRESENT" >> $GITHUB_OUTPUT
+          echo "python_present=$PYTHON_PRESENT" >> $GITHUB_OUTPUT
+          echo "dotnet_present=$DOTNET_PRESENT" >> $GITHUB_OUTPUT
+          echo "java_present=$JAVA_PRESENT" >> $GITHUB_OUTPUT
+          echo "dockerfile_present=$DOCKERFILE_PRESENT" >> $GITHUB_OUTPUT
 
       - name: Set version environment variable
         run: |
