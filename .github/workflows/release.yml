@@ -94,12 +94,15 @@ jobs:
     name: Release (${{ matrix.language }})
     needs: validate
     runs-on: ubuntu-latest
-    # Only run a matrix job if the corresponding project files exist
-    if: ${{ (matrix.language == 'node' && hashFiles('**/package.json') != '') || (matrix.language == 'python' && (hashFiles('**/pyproject.toml') != '' || hashFiles('**/setup.py') != '')) || (matrix.language == 'dotnet' && (hashFiles('**/*.sln') != '' || hashFiles('**/*.slnx') != '' || hashFiles('**/*.csproj') != '')) || (matrix.language == 'java' && (hashFiles('**/*.gradle*') != '' || hashFiles('**/gradle-wrapper.properties') != '' || hashFiles('buildSrc/**/Versions.kt') != '' || hashFiles('buildSrc/**/Dependencies.kt') != '' || hashFiles('gradle/*.versions.toml') != '' || hashFiles('**/versions.properties') != '' || hashFiles('**/pom.xml') != '')) }}
     timeout-minutes: 30
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      NODE_PRESENT: ${{ hashFiles('**/package.json') != '' }}
+      PYTHON_PRESENT: ${{ hashFiles('**/pyproject.toml') != '' || hashFiles('**/setup.py') != '' }}
+      DOTNET_PRESENT: ${{ hashFiles('**/*.sln') != '' || hashFiles('**/*.slnx') != '' || hashFiles('**/*.csproj') != '' }}
+      JAVA_PRESENT: ${{ hashFiles('**/*.gradle*') != '' || hashFiles('**/gradle-wrapper.properties') != '' || hashFiles('buildSrc/**/Versions.kt') != '' || hashFiles('buildSrc/**/Dependencies.kt') != '' || hashFiles('gradle/*.versions.toml') != '' || hashFiles('**/versions.properties') != '' || hashFiles('**/pom.xml') != '' }}
+      DOCKERFILE_PRESENT: ${{ hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,30 +119,30 @@ jobs:
           echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}" >> $GITHUB_ENV
 
       - name: Setup Node.js
-        if: ${{ matrix.language == 'node' }}
+        if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Python
-        if: ${{ matrix.language == 'python' }}
+        if: ${{ matrix.language == 'python' && env.PYTHON_PRESENT == 'true' }}
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
       - name: Setup .NET 10
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
 
       - name: Restore .NET dependencies
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: dotnet restore
 
       - name: Setup Java 17
-        if: ${{ matrix.language == 'java' }}
+        if: ${{ matrix.language == 'java' && env.JAVA_PRESENT == 'true' }}
         uses: actions/setup-java@v4
         with:
           java-version: '17'
@@ -148,7 +151,7 @@ jobs:
 
       # === .NET: Update all version numbers ===
       - name: Update .NET project versions
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
           VERSION=${{ env.VERSION }}
           if [ -z "$VERSION" ]; then 
@@ -173,7 +176,7 @@ jobs:
 
       # === Build ===
       - name: Build (Node.js)
-        if: ${{ matrix.language == 'node' }}
+        if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
         run: |
           npm ci
           npm run build --if-present
@@ -181,18 +184,18 @@ jobs:
           NODE_ENV: production
 
       - name: Build (Python)
-        if: ${{ matrix.language == 'python' }}
+        if: ${{ matrix.language == 'python' && env.PYTHON_PRESENT == 'true' }}
         run: |
           pip install --upgrade pip build wheel
           python -m build
 
       - name: Build (.NET)
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
           dotnet build --configuration Release --no-restore /p:ContinuousIntegrationBuild=true
           
       - name: Build (Java)
-        if: ${{ matrix.language == 'java' }}
+        if: ${{ matrix.language == 'java' && env.JAVA_PRESENT == 'true' }}
         run: |
           if [ -f "gradlew" ]; then
             ./gradlew build
@@ -205,26 +208,26 @@ jobs:
 
       # === Test ===
       - name: Test (Node.js)
-        if: ${{ matrix.language == 'node' }}
+        if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
         run: npm test -- --ci --coverage
         continue-on-error: false
 
       - name: Test (Python)
-        if: ${{ matrix.language == 'python' }}
+        if: ${{ matrix.language == 'python' && env.PYTHON_PRESENT == 'true' }}
         run: |
           pip install pytest pytest-cov
           python -m pytest --cov --cov-report=xml --cov-report=term
         continue-on-error: false
 
       - name: Test (.NET)
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
           dotnet test --configuration Release --no-build --verbosity normal \
             --collect:"XPlat Code Coverage" --results-directory ./coverage
         continue-on-error: false
 
       - name: Test (Java)
-        if: ${{ matrix.language == 'java' }}
+        if: ${{ matrix.language == 'java' && env.JAVA_PRESENT == 'true' }}
         run: |
           if [ -f "gradlew" ]; then
             ./gradlew test
@@ -235,7 +238,7 @@ jobs:
 
       # === Package ===
       - name: Package (.NET for NuGet)
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
           dotnet pack --configuration Release --no-build \
             -p:PackageVersion=${{ env.VERSION }} \
@@ -245,7 +248,7 @@ jobs:
 
       # === Publish to NuGet.org (only .NET) ===
       - name: Publish to NuGet.org
-        if: ${{ matrix.language == 'dotnet' && github.event.inputs.dry_run != 'true' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' && github.event.inputs.dry_run != 'true' }}
         run: |
           if [ -z "${{ secrets.NUGET_API_KEY }}" ]; then
             echo "⚠️  NUGET_API_KEY not set, skipping NuGet publish"
@@ -273,11 +276,11 @@ jobs:
 
       # === Docker Setup ===
       - name: Set up Docker Buildx
-        if: ${{ hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '' }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' }}
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: ${{ (hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '') && (github.event.inputs.docker_publish_to_hub != 'false') && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && (github.event.inputs.docker_publish_to_hub != 'false') && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
@@ -285,7 +288,7 @@ jobs:
 
       # Build and optionally push Docker image
       - name: Build and push Docker image
-        if: ${{ (hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '') && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub != 'false') && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub != 'false') && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -305,7 +308,7 @@ jobs:
 
       # Build Docker image for download only (without publishing)
       - name: Build Docker image (for download)
-        if: ${{ (hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '') && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub == 'false') }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub == 'false') }}
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -325,7 +328,7 @@ jobs:
 
       # Upload Docker image as artifact
       - name: Upload Docker image artifact
-        if: ${{ (hashFiles('Dockerfile') != '' || hashFiles('**/Dockerfile') != '') && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub == 'false') }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub == 'false') }}
         uses: actions/upload-artifact@v4
         with:
           name: docker-image-${{ matrix.language }}-${{ env.VERSION }}
@@ -335,7 +338,7 @@ jobs:
 
       # === Upload artifacts ===
       - name: Upload .NET packages
-        if: ${{ matrix.language == 'dotnet' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: nuget-packages-${{ env.VERSION }}
@@ -344,7 +347,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Python packages
-        if: ${{ matrix.language == 'python' }}
+        if: ${{ matrix.language == 'python' && env.PYTHON_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: python-packages-${{ env.VERSION }}
@@ -353,7 +356,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Node.js packages
-        if: ${{ matrix.language == 'node' }}
+        if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: node-packages-${{ env.VERSION }}
@@ -364,7 +367,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Java packages
-        if: ${{ matrix.language == 'java' }}
+        if: ${{ matrix.language == 'java' && env.JAVA_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: java-packages-${{ env.VERSION }}
