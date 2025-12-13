@@ -38,7 +38,7 @@ jobs:
     name: Validate Release
     runs-on: ubuntu-latest
     # Only proceed when CI succeeded (for workflow_run). Always run for manual dispatch.
-    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && (github.event.workflow_run.head_branch == '' || startsWith(github.event.workflow_run.head_branch, 'v'))) }}
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
