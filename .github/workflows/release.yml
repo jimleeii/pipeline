@@ -269,12 +269,13 @@ jobs:
           echo "📝 Updating .NET project versions to $VERSION"
           
           # Use Python with proper XML parsing to safely update .csproj files
-          python3 << 'PYTHON_EOF'
+          python3 << PYTHON_EOF
           import xml.etree.ElementTree as ET
           import glob
           import sys
+          import os
           
-          version = "$VERSION"
+          version = os.environ.get("VERSION", "")
           if not version:
               print("❌ Error: Version is empty")
               sys.exit(1)
