@@ -96,9 +96,10 @@ jobs:
           else
             IS_PRERELEASE="false"
           fi
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          {
+            echo "version=$VERSION"
+            echo "is_prerelease=$IS_PRERELEASE"
+          } >> "$GITHUB_OUTPUT"
           echo "✅ Version validated: $VERSION (prerelease: $IS_PRERELEASE)"
 
       - name: Check for duplicate release
@@ -146,8 +147,10 @@ jobs:
           
           # Convert array to JSON array format
           LANGUAGES_JSON=$(printf '%s\n' "${LANGUAGES[@]}" | jq -R . | jq -s .)
-          echo "languages=$LANGUAGES_JSON" >> $GITHUB_OUTPUT
-          echo "has-languages=true" >> $GITHUB_OUTPUT
+          {
+            echo "languages=$LANGUAGES_JSON"
+            echo "has-languages=true"
+          } >> "$GITHUB_OUTPUT"
           
           echo "✅ Detected languages: $(IFS=, ; echo "${LANGUAGES[*]}")"
 
@@ -197,24 +200,30 @@ jobs:
             DOCKERFILE_PRESENT=true
           fi
 
-          echo "NODE_PRESENT=$NODE_PRESENT" >> $GITHUB_ENV
-          echo "PYTHON_PRESENT=$PYTHON_PRESENT" >> $GITHUB_ENV
-          echo "DOTNET_PRESENT=$DOTNET_PRESENT" >> $GITHUB_ENV
-          echo "JAVA_PRESENT=$JAVA_PRESENT" >> $GITHUB_ENV
-          echo "DOCKERFILE_PRESENT=$DOCKERFILE_PRESENT" >> $GITHUB_ENV
+          {
+            echo "NODE_PRESENT=$NODE_PRESENT"
+            echo "PYTHON_PRESENT=$PYTHON_PRESENT"
+            echo "DOTNET_PRESENT=$DOTNET_PRESENT"
+            echo "JAVA_PRESENT=$JAVA_PRESENT"
+            echo "DOCKERFILE_PRESENT=$DOCKERFILE_PRESENT"
+          } >> "$GITHUB_ENV"
 
-          echo "node_present=$NODE_PRESENT" >> $GITHUB_OUTPUT
-          echo "python_present=$PYTHON_PRESENT" >> $GITHUB_OUTPUT
-          echo "dotnet_present=$DOTNET_PRESENT" >> $GITHUB_OUTPUT
-          echo "java_present=$JAVA_PRESENT" >> $GITHUB_OUTPUT
-          echo "dockerfile_present=$DOCKERFILE_PRESENT" >> $GITHUB_OUTPUT
+          {
+            echo "node_present=$NODE_PRESENT"
+            echo "python_present=$PYTHON_PRESENT"
+            echo "dotnet_present=$DOTNET_PRESENT"
+            echo "java_present=$JAVA_PRESENT"
+            echo "dockerfile_present=$DOCKERFILE_PRESENT"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set version environment variable
         run: |
-          echo "VERSION=${{ needs.validate.outputs.version }}" >> $GITHUB_ENV
-          echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}" >> $GITHUB_ENV
-          echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> $GITHUB_ENV
-          echo "DOCKERHUB_TOKEN=${{ secrets.DOCKERHUB_TOKEN }}" >> $GITHUB_ENV
+          {
+            echo "VERSION=${{ needs.validate.outputs.version }}"
+            echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}"
+            echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}"
+            echo "DOCKERHUB_TOKEN=${{ secrets.DOCKERHUB_TOKEN }}"
+          } >> "$GITHUB_ENV"
 
       - name: Setup Node.js
         if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
@@ -396,9 +405,9 @@ jobs:
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
         run: |
           if [ -n "$SIGNING_CERTIFICATE" ] && [ -n "$SIGNING_CERTIFICATE_PASSWORD" ]; then
-            echo "SIGNING_AVAILABLE=true" >> $GITHUB_ENV
+            echo "SIGNING_AVAILABLE=true" >> "$GITHUB_ENV"
           else
-            echo "SIGNING_AVAILABLE=false" >> $GITHUB_ENV
+              echo "SIGNING_AVAILABLE=false" >> "$GITHUB_ENV"
           fi
 
       # === NuGet Code Signing ===
@@ -474,7 +483,7 @@ jobs:
           for package in $PACKAGES; do
             echo "📦 Publishing: $package"
             dotnet nuget push "$package" \
-              --api-key ${{ secrets.NUGET_API_KEY }} \
+              --api-key "${{ secrets.NUGET_API_KEY }}" \
               --source https://api.nuget.org/v3/index.json \
               --skip-duplicate \
               --no-symbols
@@ -595,26 +604,26 @@ jobs:
             CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -50)
           else
             echo "📝 Generating changelog since $PREVIOUS_TAG"
-            CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
+            CHANGELOG=$(git log "${PREVIOUS_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges)
           fi
           
           # Create output file
-          cat > release_notes.md << 'EOF'
+          cat > release_notes.md << EOF
           ## What's Changed
           
           EOF
           echo "$CHANGELOG" >> release_notes.md
-          cat >> release_notes.md << 'EOF'
+          cat >> release_notes.md << EOF
           
           ## Artifacts
           
           - NuGet packages available at https://www.nuget.org/packages/
-          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:VERSION`
+          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:$VERSION`
           
           **Full Changelog**: See the release page for detailed changes
           EOF
           
-          echo "changelog_file=release_notes.md" >> $GITHUB_OUTPUT
+          echo "changelog_file=release_notes.md" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -632,7 +641,7 @@ jobs:
 
       - name: Publish release summary
         run: |
-          cat >> $GITHUB_STEP_SUMMARY << EOF
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
           # 🎉 Release v${{ needs.validate.outputs.version }} Published
           
           ## Release Details

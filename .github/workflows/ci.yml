@@ -34,7 +34,8 @@ jobs:
         echo "✅ Actionlint installed"
         
         echo "📝 Validating workflow files..."
-        /tmp/actionlint/actionlint "${{ github.workspace }}/.github/workflows/"*.yml || {
+        WORKFLOW_DIR="${{ github.workspace }}/.github/workflows"
+        find "$WORKFLOW_DIR" -maxdepth 1 -name '*.yml' -print0 | xargs -0 /tmp/actionlint/actionlint || {
           echo "❌ Workflow validation failed"
           exit 1
         }
@@ -54,15 +55,15 @@ jobs:
       id: detect
       run: |
         if [ -f package.json ]; then
-          echo "project_type=node" >> $GITHUB_OUTPUT
+          echo "project_type=node" >> "$GITHUB_OUTPUT"
         elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
-          echo "project_type=python" >> $GITHUB_OUTPUT
+          echo "project_type=python" >> "$GITHUB_OUTPUT"
         elif find . -name "*.csproj" -type f | grep -q .; then
-          echo "project_type=dotnet" >> $GITHUB_OUTPUT
+          echo "project_type=dotnet" >> "$GITHUB_OUTPUT"
         elif [ -f pom.xml ] || [ -f build.gradle ]; then
-          echo "project_type=java" >> $GITHUB_OUTPUT
+          echo "project_type=java" >> "$GITHUB_OUTPUT"
         else
-          echo "project_type=unknown" >> $GITHUB_OUTPUT
+          echo "project_type=unknown" >> "$GITHUB_OUTPUT"
         fi
 
     # Node.js vulnerability scanning
@@ -117,20 +118,20 @@ jobs:
       id: detect
       run: |
         if [ -f package.json ]; then
-          echo "project_type=node" >> $GITHUB_OUTPUT
+          echo "project_type=node" >> "$GITHUB_OUTPUT"
         elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
-          echo "project_type=python" >> $GITHUB_OUTPUT
+          echo "project_type=python" >> "$GITHUB_OUTPUT"
         elif find . -name "*.csproj" -type f | grep -q .; then
-          echo "project_type=dotnet" >> $GITHUB_OUTPUT
+          echo "project_type=dotnet" >> "$GITHUB_OUTPUT"
         elif [ -f pom.xml ] || [ -f build.gradle ]; then
-          echo "project_type=java" >> $GITHUB_OUTPUT
+          echo "project_type=java" >> "$GITHUB_OUTPUT"
           if [ -f pom.xml ]; then
-            echo "java_cache=maven" >> $GITHUB_OUTPUT
+            echo "java_cache=maven" >> "$GITHUB_OUTPUT"
           else
-            echo "java_cache=gradle" >> $GITHUB_OUTPUT
+            echo "java_cache=gradle" >> "$GITHUB_OUTPUT"
           fi
         else
-          echo "project_type=unknown" >> $GITHUB_OUTPUT
+          echo "project_type=unknown" >> "$GITHUB_OUTPUT"
         fi
 
     # =============== Node.js ===============
@@ -182,7 +183,7 @@ jobs:
       run: |
         BUILD_NUMBER=${{ github.run_number }}
         VERSION="${{ env.CURRENT_VERSION }}.$BUILD_NUMBER"
-        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
         echo "Building with version: $VERSION"
 
     # =============== Java ===============
