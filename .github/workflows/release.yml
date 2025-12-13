@@ -276,6 +276,7 @@ jobs:
       - name: Update .NET project versions
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
+          VERSION="${{ steps.dotnet-version.outputs.version }}"
           if [ -z "$VERSION" ]; then 
             echo "❌ Error: Version not set!"
             exit 1
