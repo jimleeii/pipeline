@@ -10,7 +10,7 @@ on:
   workflow_dispatch:  # Allow manual triggering
 
 env:
-  NODE_VERSION: '18'
+  NODE_VERSION: '20'
   PYTHON_VERSION: '3.11'
   DOTNET_VERSION: '10.0.x'
   JAVA_VERSION: '17'

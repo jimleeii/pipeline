@@ -30,6 +30,11 @@ permissions:
   id-token: write
 
 env:
+  NODE_VERSION: '20'
+  PYTHON_VERSION: '3.11'
+  DOTNET_VERSION: '10.0.x'
+  JAVA_VERSION: '17'
+  CURRENT_VERSION: '1.0.0'
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
@@ -229,30 +234,41 @@ jobs:
         if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Setup Python
         if: ${{ matrix.language == 'python' && env.PYTHON_PRESENT == 'true' }}
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Setup .NET 10
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '10.0.x'
+          dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Restore .NET dependencies
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: dotnet restore
 
+      # Calculate build version for .NET
+      - name: Calculate .NET version
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
+        id: dotnet-version
+        run: |
+          BUILD_NUMBER=${{ github.run_number }}
+          VERSION="${{ env.CURRENT_VERSION }}.$BUILD_NUMBER"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building with version: $VERSION"
+
       - name: Setup Java 17
         if: ${{ matrix.language == 'java' && env.JAVA_PRESENT == 'true' }}
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'gradle'
 
@@ -260,7 +276,6 @@ jobs:
       - name: Update .NET project versions
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
-          VERSION=${{ env.VERSION }}
           if [ -z "$VERSION" ]; then 
             echo "❌ Error: Version not set!"
             exit 1
