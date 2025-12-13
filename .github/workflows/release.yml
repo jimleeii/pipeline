@@ -607,18 +607,18 @@ jobs:
             CHANGELOG=$(git log "${PREVIOUS_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges)
           fi
           
-          # Create output file
-          cat > release_notes.md << EOF
+          # Create output file (quote heredoc to avoid shell expansions/backticks)
+          cat > release_notes.md << 'EOF'
           ## What's Changed
           
           EOF
           echo "$CHANGELOG" >> release_notes.md
-          cat >> release_notes.md << EOF
+          cat >> release_notes.md << 'EOF'
           
           ## Artifacts
           
           - NuGet packages available at https://www.nuget.org/packages/
-          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:$VERSION`
+          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ needs.validate.outputs.version }}`
           
           **Full Changelog**: See the release page for detailed changes
           EOF
