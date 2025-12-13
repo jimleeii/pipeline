@@ -389,9 +389,24 @@ jobs:
             -p:RepositoryCommit=${{ github.sha }} \
             --output ./packages
 
+      - name: Prepare signing secrets flag
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          if [ -n "$SIGNING_CERTIFICATE" ] && [ -n "$SIGNING_CERTIFICATE_PASSWORD" ]; then
+            echo "SIGNING_AVAILABLE=true" >> $GITHUB_ENV
+          else
+            echo "SIGNING_AVAILABLE=false" >> $GITHUB_ENV
+          fi
+
       # === NuGet Code Signing ===
       - name: Sign NuGet packages
-        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' && secrets.SIGNING_CERTIFICATE != '' }}
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' && env.SIGNING_AVAILABLE == 'true' }}
+        env:
+          SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
         run: |
           echo "🔐 Signing NuGet packages..."
           
@@ -407,7 +422,7 @@ jobs:
           fi
           
           # Create temporary certificate file from base64-encoded secret
-          echo "${{ secrets.SIGNING_CERTIFICATE }}" | base64 -d > /tmp/signing_cert.pfx 2>/dev/null || {
+          echo "$SIGNING_CERTIFICATE" | base64 -d > /tmp/signing_cert.pfx 2>/dev/null || {
             echo "⚠️  Unable to decode SIGNING_CERTIFICATE. Ensure it's base64-encoded. Skipping signing."
             exit 0
           }
@@ -419,7 +434,7 @@ jobs:
             echo "🔐 Signing package: $package"
             if nuget sign "$package" \
               -CertificatePath /tmp/signing_cert.pfx \
-              -CertificatePassword "${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}" \
+              -CertificatePassword "$SIGNING_CERTIFICATE_PASSWORD" \
               -Timestamper http://timestamp.digicert.com -Overwrite; then
               ((SUCCESS_COUNT++))
               echo "✅ Successfully signed: $package"
@@ -602,7 +617,7 @@ jobs:
           echo "changelog_file=release_notes.md" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.validate.outputs.version }}
           name: Release v${{ needs.validate.outputs.version }}
