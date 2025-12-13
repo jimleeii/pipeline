@@ -410,7 +410,7 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
           dotnet pack --configuration Release --no-build \
-            -p:PackageVersion=${{ env.VERSION }} \
+            -p:PackageVersion=${{ steps.dotnet-version.outputs.version }} \
             -p:RepositoryUrl=${{ github.server_url }}/${{ github.repository }} \
             -p:RepositoryCommit=${{ github.sha }} \
             --output ./packages
