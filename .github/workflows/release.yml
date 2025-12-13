@@ -593,8 +593,6 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          VERSION="${{ needs.validate.outputs.version }}"
-          
           # Find previous tag (only for actual releases, not first release)
           PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           
