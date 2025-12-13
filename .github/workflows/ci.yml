@@ -320,7 +320,10 @@ jobs:
             fi
             ;;
           dotnet)
-            dotnet test --no-build --verbosity normal --logger trx --collect:"XPlat Code Coverage" --results-directory ./TestResults || {
+            dotnet test --no-build --verbosity normal \
+              --logger "trx;LogFileName=test-results.trx" \
+              --collect:"XPlat Code Coverage" \
+              --results-directory ./TestResults || {
               echo "❌ Error: .NET tests failed"
               exit 1
             }
@@ -410,6 +413,6 @@ jobs:
         path: |
           **/test-results/*.xml
           **/surefire-reports/*.xml
-          **/TestResults/*.trx
+          **/TestResults/**/*.trx
         reporter: java-junit
         fail-on-error: false
