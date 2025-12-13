@@ -95,20 +95,7 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     # Only run a matrix job if the corresponding project files exist
-    if: ${{
-      (matrix.language == 'node'   && hashFiles('**/package.json') != '') ||
-      (matrix.language == 'python' && (hashFiles('**/pyproject.toml') != '' || hashFiles('**/setup.py') != '')) ||
-      (matrix.language == 'dotnet' && (hashFiles('**/*.sln') != '' || hashFiles('**/*.slnx') != '' || hashFiles('**/*.csproj') != '')) ||
-      (matrix.language == 'java'   && (
-        hashFiles('**/*.gradle*') != '' ||
-        hashFiles('**/gradle-wrapper.properties') != '' ||
-        hashFiles('buildSrc/**/Versions.kt') != '' ||
-        hashFiles('buildSrc/**/Dependencies.kt') != '' ||
-        hashFiles('gradle/*.versions.toml') != '' ||
-        hashFiles('**/versions.properties') != '' ||
-        hashFiles('**/pom.xml') != ''
-      ))
-    }}
+    if: ${{ (matrix.language == 'node' && hashFiles('**/package.json') != '') || (matrix.language == 'python' && (hashFiles('**/pyproject.toml') != '' || hashFiles('**/setup.py') != '')) || (matrix.language == 'dotnet' && (hashFiles('**/*.sln') != '' || hashFiles('**/*.slnx') != '' || hashFiles('**/*.csproj') != '')) || (matrix.language == 'java' && (hashFiles('**/*.gradle*') != '' || hashFiles('**/gradle-wrapper.properties') != '' || hashFiles('buildSrc/**/Versions.kt') != '' || hashFiles('buildSrc/**/Dependencies.kt') != '' || hashFiles('gradle/*.versions.toml') != '' || hashFiles('**/versions.properties') != '' || hashFiles('**/pom.xml') != '')) }}
     timeout-minutes: 30
     env:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
