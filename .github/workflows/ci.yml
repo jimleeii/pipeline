@@ -35,7 +35,7 @@ jobs:
         echo "✅ Actionlint installed"
         
         echo "📝 Validating workflow files..."
-        /tmp/actionlint/actionlint "${{ github.workspace }}/.github/workflows/*.yml" || {
+        /tmp/actionlint/actionlint "${{ github.workspace }}/.github/workflows/"*.yml || {
           echo "❌ Workflow validation failed"
           exit 1
         }
