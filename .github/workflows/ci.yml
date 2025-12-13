@@ -17,7 +17,96 @@ env:
   CURRENT_VERSION: '1.0.0'
 
 jobs:
+  validate-workflows:
+    name: Validate Workflow Syntax
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Validate GitHub Actions workflows
+      run: |
+        echo "📋 Installing actionlint for workflow validation..."
+        mkdir -p /tmp/actionlint
+        cd /tmp/actionlint
+        wget -q https://github.com/rhysd/actionlint/releases/download/v1.6.27/actionlint_linux_amd64.zip
+        unzip -q actionlint_linux_amd64.zip
+        chmod +x ./actionlint
+        echo "✅ Actionlint installed"
+        
+        echo "📝 Validating workflow files..."
+        /tmp/actionlint/actionlint "${{ github.workspace }}/.github/workflows/*.yml" || {
+          echo "❌ Workflow validation failed"
+          exit 1
+        }
+        echo "✅ All workflows are syntactically valid"
+
+  scan-dependencies:
+    name: Scan for Vulnerable Dependencies
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Detect project type
+      id: detect
+      run: |
+        if [ -f package.json ]; then
+          echo "project_type=node" >> $GITHUB_OUTPUT
+        elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+          echo "project_type=python" >> $GITHUB_OUTPUT
+        elif find . -name "*.csproj" -type f | grep -q .; then
+          echo "project_type=dotnet" >> $GITHUB_OUTPUT
+        elif [ -f pom.xml ] || [ -f build.gradle ]; then
+          echo "project_type=java" >> $GITHUB_OUTPUT
+        else
+          echo "project_type=unknown" >> $GITHUB_OUTPUT
+        fi
+
+    # Node.js vulnerability scanning
+    - name: Run npm audit (Node.js)
+      if: ${{ steps.detect.outputs.project_type == 'node' }}
+      run: |
+        echo "🔍 Scanning Node.js dependencies for vulnerabilities..."
+        npm audit --audit-level=moderate || {
+          echo "⚠️  Vulnerabilities found. Run 'npm audit fix' to resolve."
+          exit 1
+        }
+
+    # Python vulnerability scanning
+    - name: Run pip-audit (Python)
+      if: ${{ steps.detect.outputs.project_type == 'python' }}
+      run: |
+        echo "🔍 Scanning Python dependencies for vulnerabilities..."
+        pip install pip-audit > /dev/null 2>&1
+        pip-audit --desc || echo "⚠️  Review vulnerabilities above"
+
+    # .NET vulnerability scanning
+    - name: Run dotnet list package (dotnet)
+      if: ${{ steps.detect.outputs.project_type == 'dotnet' }}
+      run: |
+        echo "🔍 Scanning .NET dependencies for vulnerabilities..."
+        dotnet tool install --global dotnet-outdated-tool > /dev/null 2>&1 || true
+        dotnet outdated || echo "⚠️  Review outdated packages above"
+
+    # Java vulnerability scanning
+    - name: Run dependency-check (Java)
+      if: ${{ steps.detect.outputs.project_type == 'java' }}
+      uses: dependency-check/Dependency-Check_Action@main
+      with:
+        project: 'Java Project'
+        path: '.'
+        format: 'JSON'
+        args: >
+          --enableExperimental
+      continue-on-error: true
+
   build-test:
+    name: Build and Test
+    needs: [validate-workflows, scan-dependencies]
     runs-on: ubuntu-latest
 
     steps:
@@ -114,15 +203,34 @@ jobs:
       run: |
         case "${{ steps.detect.outputs.project_type }}" in
           node)
+            if [ ! -f package.json ]; then
+              echo "❌ Error: package.json not found but detected as Node.js project"
+              exit 1
+            fi
             npm ci
             ;;
           python)
-            pip install -r requirements.txt 2>/dev/null || pip install -e .
+            if [ ! -f requirements.txt ] && [ ! -f pyproject.toml ] && [ ! -f setup.py ] && [ ! -f poetry.lock ]; then
+              echo "❌ Error: No Python dependency file found (requirements.txt, pyproject.toml, setup.py, or poetry.lock required)"
+              exit 1
+            fi
+            pip install -r requirements.txt 2>/dev/null || pip install -e . || {
+              echo "❌ Error: Failed to install Python dependencies"
+              exit 1
+            }
             ;;
           dotnet)
+            if ! find . -name "*.csproj" -type f | grep -q .; then
+              echo "❌ Error: No .csproj files found but detected as .NET project"
+              exit 1
+            fi
             dotnet restore
             ;;
           java)
+            if [ ! -f pom.xml ] && [ ! -f build.gradle ]; then
+              echo "❌ Error: No pom.xml or build.gradle found but detected as Java project"
+              exit 1
+            fi
             if [ -f pom.xml ]; then
               mvn dependency:go-offline
             elif [ -f build.gradle ]; then
@@ -130,7 +238,7 @@ jobs:
             fi
             ;;
           *)
-            echo "Unknown project type — skipping install"
+            echo "❌ Error: Unknown project type"
             exit 1
             ;;
         esac
@@ -148,17 +256,35 @@ jobs:
               /p:Version=$VERSION \
               /p:AssemblyVersion=$VERSION \
               /p:FileVersion=$VERSION \
-              /p:InformationalVersion=$VERSION
+              /p:InformationalVersion=$VERSION || {
+              echo "❌ Error: .NET build failed"
+              exit 1
+            }
             ;;
           java)
+            if [ ! -f pom.xml ] && [ ! -f build.gradle ]; then
+              echo "❌ Error: No pom.xml or gradlew found for Java project"
+              exit 1
+            fi
             if [ -f pom.xml ]; then
-              mvn compile
+              mvn compile || {
+                echo "❌ Error: Maven compilation failed"
+                exit 1
+              }
             elif [ -f build.gradle ]; then
-              ./gradlew build -x test || gradle build -x test
+              if [ -f gradlew ]; then
+                ./gradlew build -x test || {
+                  echo "❌ Error: Gradle build failed"
+                  exit 1
+                }
+              else
+                echo "❌ Error: build.gradle found but no gradlew wrapper - use gradle wrapper (gradlew)"
+                exit 1
+              fi
             fi
             ;;
           python|*)
-            echo "No explicit build step required"
+            echo "ℹ️  No explicit build step required for ${{ steps.detect.outputs.project_type }}"
             ;;
         esac
 
@@ -167,23 +293,62 @@ jobs:
       run: |
         case "${{ steps.detect.outputs.project_type }}" in
           node)
-            npm test
+            if [ ! -f package.json ]; then
+              echo "❌ Error: package.json not found for Node.js tests"
+              exit 1
+            fi
+            npm test || {
+              echo "❌ Error: Node.js tests failed"
+              exit 1
+            }
             ;;
           python)
-            python -m pytest 2>/dev/null || python -m unittest discover || echo "No tests found"
+            # Validate test configuration exists
+            if [ ! -f pytest.ini ] && [ ! -f setup.cfg ] && [ ! -f pyproject.toml ] && [ ! -f "tests/__init__.py" ] && [ ! -d tests ]; then
+              echo "⚠️  Warning: No pytest/unittest configuration found. Tests are required for production projects."
+              echo "Create one of: pytest.ini, setup.cfg, pyproject.toml, or tests/ directory"
+              # Try to run tests anyway
+              python -m pytest 2>/dev/null || python -m unittest discover 2>/dev/null || {
+                echo "❌ Error: No tests found. Please add tests to your Python project."
+                exit 1
+              }
+            else
+              python -m pytest 2>/dev/null || python -m unittest discover || {
+                echo "❌ Error: Python tests failed"
+                exit 1
+              }
+            fi
             ;;
           dotnet)
-            dotnet test --no-build --verbosity normal --logger trx --collect:"XPlat Code Coverage" --results-directory ./TestResults
+            dotnet test --no-build --verbosity normal --logger trx --collect:"XPlat Code Coverage" --results-directory ./TestResults || {
+              echo "❌ Error: .NET tests failed"
+              exit 1
+            }
             ;;
           java)
+            if [ ! -f pom.xml ] && [ ! -f build.gradle ]; then
+              echo "❌ Error: No pom.xml or build.gradle found for Java tests"
+              exit 1
+            fi
             if [ -f pom.xml ]; then
-              mvn test
+              mvn test || {
+                echo "❌ Error: Maven tests failed"
+                exit 1
+              }
             elif [ -f build.gradle ]; then
-              ./gradlew test || gradle test
+              if [ -f gradlew ]; then
+                ./gradlew test || {
+                  echo "❌ Error: Gradle tests failed"
+                  exit 1
+                }
+              else
+                echo "❌ Error: build.gradle found but no gradlew wrapper - use gradle wrapper"
+                exit 1
+              fi
             fi
             ;;
           *)
-            echo "No test command defined"
+            echo "❌ Error: No test command defined for project type"
             exit 1
             ;;
         esac
@@ -199,3 +364,52 @@ jobs:
           **/coverage.cobertura.xml
         retention-days: 30
         if-no-files-found: ignore
+
+    - name: Upload Node.js test results
+      if: always() && steps.detect.outputs.project_type == 'node'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-node-${{ runner.os }}
+        path: |
+          coverage/
+          __tests__/
+          .nyc_output/
+        retention-days: 30
+        if-no-files-found: ignore
+
+    - name: Upload Python test results
+      if: always() && steps.detect.outputs.project_type == 'python'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-python-${{ runner.os }}
+        path: |
+          htmlcov/
+          .coverage
+          coverage.xml
+          .pytest_cache/
+        retention-days: 30
+        if-no-files-found: ignore
+
+    - name: Upload Java test results
+      if: always() && steps.detect.outputs.project_type == 'java'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-java-${{ runner.os }}
+        path: |
+          target/surefire-reports/
+          build/test-results/
+          target/site/jacoco/
+        retention-days: 30
+        if-no-files-found: ignore
+
+    - name: Publish test results to GitHub Checks
+      if: always()
+      uses: dorny/test-reporter@v1
+      with:
+        name: Test Results - ${{ steps.detect.outputs.project_type }}
+        path: |
+          **/test-results/*.xml
+          **/surefire-reports/*.xml
+          **/TestResults/*.trx
+        reporter: java-junit
+        fail-on-error: false

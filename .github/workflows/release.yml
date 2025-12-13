@@ -37,8 +37,8 @@ jobs:
   validate:
     name: Validate Release
     runs-on: ubuntu-latest
-    # Only proceed when CI succeeded (for workflow_run). Always run for manual dispatch.
-    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && (github.event.workflow_run.head_branch == '' || startsWith(github.event.workflow_run.head_branch, 'v'))) }}
+    # Condition: Run for manual releases OR successful CI completions
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     outputs:
       version: ${{ steps.version.outputs.version }}
       is_prerelease: ${{ steps.version.outputs.is_prerelease }}
@@ -51,28 +51,46 @@ jobs:
       - name: Validate and determine version
         id: version
         run: |
+          set -e  # Exit on any error
+          
+          # Determine version based on trigger type
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "ℹ️  Manual release triggered"
             VERSION="${{ github.event.inputs.version }}"
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
-            git fetch --tags --quiet
-            HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
-            VERSION_TAG=$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
-            if [ -z "$VERSION_TAG" ]; then
-              echo "Error: No version tag (vX.Y.Z) found on commit $HEAD_SHA"
+            
+            if [ -z "$VERSION" ]; then
+              echo "❌ Error: Version input is required for manual releases"
               exit 1
             fi
+          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+            echo "ℹ️  Automated release triggered from CI completion"
+            git fetch --tags --quiet
+            HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
+            
+            # Look for version tag on current commit
+            VERSION_TAG=$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+            
+            if [ -z "$VERSION_TAG" ]; then
+              echo "ℹ️  No version tag found on commit $HEAD_SHA - release not needed"
+              # This is normal for feature branches - just exit cleanly
+              exit 0
+            fi
+            
             VERSION="${VERSION_TAG#v}"
+            echo "ℹ️  Found version tag: v$VERSION"
           else
+            # Fallback for other trigger types
             VERSION="${GITHUB_REF#refs/tags/v}"
           fi
           
-          # Validate semantic version format
+          # Validate semantic version format (X.Y.Z with optional prerelease/build)
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]; then
-            echo "Error: Invalid semantic version format: $VERSION"
+            echo "❌ Error: Invalid semantic version format: $VERSION"
+            echo "Expected format: X.Y.Z (e.g., 1.0.0, 1.0.0-beta.1, 1.0.0+build.123)"
             exit 1
           fi
           
-          # Check if prerelease
+          # Determine if prerelease (contains hyphen in version)
           if [[ "$VERSION" =~ - ]]; then
             IS_PRERELEASE="true"
           else
@@ -90,18 +108,59 @@ jobs:
             echo "⚠️  Warning: Tag v$VERSION already exists"
           fi
 
+  detect-languages:
+    name: Detect Active Languages
+    runs-on: ubuntu-latest
+    outputs:
+      languages: ${{ steps.detect.outputs.languages }}
+      has-languages: ${{ steps.detect.outputs.has-languages }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Detect active languages
+        id: detect
+        run: |
+          LANGUAGES=()
+          
+          if [ -f package.json ]; then
+            LANGUAGES+=(node)
+          fi
+          
+          if [ -f pyproject.toml ] || [ -f requirements.txt ]; then
+            LANGUAGES+=(python)
+          fi
+          
+          if find . -name "*.csproj" -type f | grep -q .; then
+            LANGUAGES+=(dotnet)
+          fi
+          
+          if [ -f pom.xml ] || [ -f build.gradle ]; then
+            LANGUAGES+=(java)
+          fi
+          
+          if [ ${#LANGUAGES[@]} -eq 0 ]; then
+            echo "❌ Error: No supported project types detected"
+            exit 1
+          fi
+          
+          # Convert array to JSON array format
+          LANGUAGES_JSON=$(printf '%s\n' "${LANGUAGES[@]}" | jq -R . | jq -s .)
+          echo "languages=$LANGUAGES_JSON" >> $GITHUB_OUTPUT
+          echo "has-languages=true" >> $GITHUB_OUTPUT
+          
+          echo "✅ Detected languages: $(IFS=, ; echo "${LANGUAGES[*]}")"
+
   release:
     name: Release (${{ matrix.language }})
-    needs: validate
+    needs: [validate, detect-languages]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    if: ${{ needs.detect-languages.outputs.has-languages == 'true' }}
     strategy:
       fail-fast: false
       matrix:
-        language: [node, python, dotnet, java]
+        language: ${{ fromJson(needs.detect-languages.outputs.languages) }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -154,6 +213,8 @@ jobs:
         run: |
           echo "VERSION=${{ needs.validate.outputs.version }}" >> $GITHUB_ENV
           echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}" >> $GITHUB_ENV
+          echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}" >> $GITHUB_ENV
+          echo "DOCKERHUB_TOKEN=${{ secrets.DOCKERHUB_TOKEN }}" >> $GITHUB_ENV
 
       - name: Setup Node.js
         if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
@@ -198,18 +259,64 @@ jobs:
 
           echo "📝 Updating .NET project versions to $VERSION"
           
-          # Update all .csproj files
-          find . -name "*.csproj" -type f -exec sed -i "s|<Version>.*</Version>|<Version>$VERSION</Version>|" {} \;
+          # Use Python with proper XML parsing to safely update .csproj files
+          python3 << 'PYTHON_EOF'
+          import xml.etree.ElementTree as ET
+          import glob
+          import sys
           
-          # Also update PackageVersion if present
-          find . -name "*.csproj" -type f -exec sed -i "s|<PackageVersion>.*</PackageVersion>|<PackageVersion>$VERSION</PackageVersion>|" {} \;
-
+          version = "$VERSION"
+          if not version:
+              print("❌ Error: Version is empty")
+              sys.exit(1)
+          
+          # Update all .csproj files
+          for csproj_file in glob.glob("**/*.csproj", recursive=True):
+              try:
+                  ET.register_namespace('', 'http://schemas.microsoft.com/developer/msbuild/2003')
+                  tree = ET.parse(csproj_file)
+                  root = tree.getroot()
+                  ns = {'msbuild': 'http://schemas.microsoft.com/developer/msbuild/2003'}
+                  
+                  # Update Version element
+                  version_elem = root.find('msbuild:Version', ns)
+                  if version_elem is None:
+                      version_elem = root.find('Version')
+                  if version_elem is not None:
+                      version_elem.text = version
+                  
+                  # Update PackageVersion element if present
+                  pkg_version_elem = root.find('msbuild:PackageVersion', ns)
+                  if pkg_version_elem is None:
+                      pkg_version_elem = root.find('PackageVersion')
+                  if pkg_version_elem is not None:
+                      pkg_version_elem.text = version
+                  
+                  tree.write(csproj_file, encoding='utf-8', xml_declaration=True)
+                  print(f"✅ Updated {csproj_file} to version {version}")
+              except Exception as e:
+                  print(f"❌ Error updating {csproj_file}: {e}")
+                  sys.exit(1)
+          
           # Update Directory.Packages.props if it exists
-          if [ -f "Directory.Packages.props" ]; then
-            sed -i "s|<Version>.*</Version>|<Version>$VERSION</Version>|" Directory.Packages.props
-          fi
-
-          echo "✅ Version updated successfully"
+          for props_file in glob.glob("Directory.Packages.props"):
+              try:
+                  ET.register_namespace('', 'http://schemas.microsoft.com/developer/msbuild/2003')
+                  tree = ET.parse(props_file)
+                  root = tree.getroot()
+                  ns = {'msbuild': 'http://schemas.microsoft.com/developer/msbuild/2003'}
+                  
+                  for version_elem in root.findall('.//msbuild:Version', ns) + root.findall('.//Version'):
+                      version_elem.text = version
+                  
+                  tree.write(props_file, encoding='utf-8', xml_declaration=True)
+                  print(f"✅ Updated {props_file} to version {version}")
+              except Exception as e:
+                  print(f"❌ Error updating {props_file}: {e}")
+                  sys.exit(1)
+          
+          print("✅ All .NET project versions updated successfully")
+          PYTHON_EOF
 
       # === Build ===
       - name: Build (Node.js)
@@ -273,7 +380,6 @@ jobs:
           fi
         continue-on-error: false
 
-      # === Package ===
       - name: Package (.NET for NuGet)
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
@@ -283,7 +389,57 @@ jobs:
             -p:RepositoryCommit=${{ github.sha }} \
             --output ./packages
 
-      # === Publish to NuGet.org (only .NET) ===
+      # === NuGet Code Signing ===
+      - name: Sign NuGet packages
+        if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' && secrets.SIGNING_CERTIFICATE != '' }}
+        run: |
+          echo "🔐 Signing NuGet packages..."
+          
+          # Install NuGet CLI tool
+          dotnet tool install --global NuGet.CommandLine
+          
+          # Find all .nupkg files (excluding .symbols.nupkg)
+          PACKAGES=$(find ./packages -name "*.nupkg" ! -name "*.symbols.nupkg")
+          
+          if [ -z "$PACKAGES" ]; then
+            echo "⚠️  No packages found to sign. Skipping signature step."
+            exit 0
+          fi
+          
+          # Create temporary certificate file from base64-encoded secret
+          echo "${{ secrets.SIGNING_CERTIFICATE }}" | base64 -d > /tmp/signing_cert.pfx 2>/dev/null || {
+            echo "⚠️  Unable to decode SIGNING_CERTIFICATE. Ensure it's base64-encoded. Skipping signing."
+            exit 0
+          }
+          
+          SUCCESS_COUNT=0
+          FAIL_COUNT=0
+          
+          for package in $PACKAGES; do
+            echo "🔐 Signing package: $package"
+            if nuget sign "$package" \
+              -CertificatePath /tmp/signing_cert.pfx \
+              -CertificatePassword "${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}" \
+              -Timestamper http://timestamp.digicert.com -Overwrite; then
+              ((SUCCESS_COUNT++))
+              echo "✅ Successfully signed: $package"
+            else
+              ((FAIL_COUNT++))
+              echo "⚠️  Failed to sign: $package (Ensure SIGNING_CERTIFICATE and SIGNING_CERTIFICATE_PASSWORD secrets are set correctly)"
+            fi
+          done
+          
+          # Clean up certificate file
+          rm -f /tmp/signing_cert.pfx
+          
+          if [ $FAIL_COUNT -gt 0 ]; then
+            echo "⚠️  Signed $SUCCESS_COUNT package(s), failed to sign $FAIL_COUNT package(s)"
+            echo "ℹ️  Set up signing by adding SIGNING_CERTIFICATE (base64-encoded .pfx) and SIGNING_CERTIFICATE_PASSWORD to repository secrets"
+          else
+            echo "✅ All NuGet packages signed successfully"
+          fi
+
+      # === Publish to NuGet.org ===
       - name: Publish to NuGet.org
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' && github.event.inputs.dry_run != 'true' }}
         run: |
@@ -317,19 +473,19 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
-        if: ${{ env.DOCKERFILE_PRESENT == 'true' && (github.event.inputs.docker_publish_to_hub != 'false') && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.docker_publish_to_hub != 'false' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
         with:
-          username: ${{ env.DOCKERHUB_USERNAME }}
-          password: ${{ env.DOCKERHUB_TOKEN }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Build and optionally push Docker image
+      # Unified Docker build and push (avoids code duplication)
       - name: Build and push Docker image
-        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub != 'false') && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
+          push: ${{ github.event.inputs.docker_publish_to_hub != 'false' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
           tags: |
             ${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ env.VERSION }}
             ${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
@@ -341,31 +497,11 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
-          outputs: type=image,name=${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
+          outputs: type=image
 
-      # Build Docker image for download only (without publishing)
-      - name: Build Docker image (for download)
-        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub == 'false') }}
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
-          tags: |
-            ${{ github.event.repository.name }}:${{ env.VERSION }}
-            ${{ github.event.repository.name }}:latest
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
-          outputs: type=docker,dest=/tmp/${{ github.event.repository.name }}-${{ env.VERSION }}.tar
-
-      # Upload Docker image as artifact
+      # Upload Docker image artifact (for download-only builds)
       - name: Upload Docker image artifact
-        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && (github.event.inputs.docker_publish_to_hub == 'false') }}
+        if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && github.event.inputs.docker_publish_to_hub == 'false' }}
         uses: actions/upload-artifact@v4
         with:
           name: docker-image-${{ matrix.language }}-${{ env.VERSION }}
@@ -435,29 +571,32 @@ jobs:
         run: |
           VERSION="${{ needs.validate.outputs.version }}"
           
-          # Try to find previous tag
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          # Find previous tag (only for actual releases, not first release)
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           
           if [ -z "$PREVIOUS_TAG" ]; then
-            echo "📝 Generating changelog from all commits"
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges)
+            echo "📝 First release detected - including recent commits"
+            # For first release, limit to last 50 commits to avoid huge changelogs
+            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -50)
           else
             echo "📝 Generating changelog since $PREVIOUS_TAG"
             CHANGELOG=$(git log ${PREVIOUS_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges)
           fi
           
-          # Save to file for release notes
-          cat > release_notes.md << EOF
+          # Create output file
+          cat > release_notes.md << 'EOF'
           ## What's Changed
           
-          $CHANGELOG
+          EOF
+          echo "$CHANGELOG" >> release_notes.md
+          cat >> release_notes.md << 'EOF'
           
           ## Artifacts
           
           - NuGet packages available at https://www.nuget.org/packages/
-          - Docker images: \`docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:$VERSION\`
+          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:VERSION`
           
-          **Full Changelog**: ${{ github.server_url }}/${{ github.repository }}/compare/${PREVIOUS_TAG}...v$VERSION
+          **Full Changelog**: See the release page for detailed changes
           EOF
           
           echo "changelog_file=release_notes.md" >> $GITHUB_OUTPUT
@@ -495,3 +634,33 @@ jobs:
           - [Release Page](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.validate.outputs.version }})
           - [NuGet Gallery](https://www.nuget.org/packages/)
           EOF
+
+  handle-release-failure:
+    name: Handle Release Failure
+    runs-on: ubuntu-latest
+    needs: [validate, release]
+    if: ${{ failure() && github.event.inputs.dry_run != 'true' }}
+    steps:
+      - name: Create issue on release failure
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔴 Release v${{ needs.validate.outputs.version }} Failed`,
+              body: `Release workflow failed for version ${{ needs.validate.outputs.version }}.
+              
+              **Details:**
+              - Run ID: ${{ github.run_id }}
+              - Run Number: ${{ github.run_number }}
+              - Commit: ${{ github.sha }}
+              
+              **Action Required:**
+              Review the [workflow logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) to diagnose and fix the issue.
+              
+              Once fixed, manually retrigger the release or delete the failed tag and try again.`,
+              labels: ['release', 'failure']
+            })
+            console.log('📋 Failure issue created')
