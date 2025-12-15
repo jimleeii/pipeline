@@ -30,7 +30,7 @@ permissions:
   id-token: write
 
 env:
-  VERSION: '1.0.0'
+  RELEASE_VERSION: '1.0.0'
 
   NODE_VERSION: '20'
   PYTHON_VERSION: '3.11'
@@ -262,7 +262,7 @@ jobs:
         id: dotnet-version
         run: |
           BUILD_NUMBER=${{ github.run_number }}
-          VERSION="${{ env.VERSION }}.$BUILD_NUMBER"
+          VERSION="${{ env.RELEASE_VERSION }}.$BUILD_NUMBER"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building with version: $VERSION"
 
@@ -530,12 +530,12 @@ jobs:
           context: .
           push: ${{ github.event.inputs.docker_publish_to_hub != 'false' && env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
           tags: |
-            ${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ env.VERSION }}
+            ${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ env.RELEASE_VERSION }}
             ${{ env.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.version=${{ env.RELEASE_VERSION }}
             org.opencontainers.image.created=${{ github.event.head_commit.timestamp }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -547,8 +547,8 @@ jobs:
         if: ${{ env.DOCKERFILE_PRESENT == 'true' && github.event.inputs.dry_run != 'true' && github.event.inputs.docker_publish_to_hub == 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image-${{ matrix.language }}-${{ env.VERSION }}
-          path: /tmp/${{ github.event.repository.name }}-${{ env.VERSION }}.tar
+          name: docker-image-${{ matrix.language }}-${{ env.RELEASE_VERSION }}
+          path: /tmp/${{ github.event.repository.name }}-${{ env.RELEASE_VERSION }}.tar
           retention-days: 30
           if-no-files-found: warn
 
@@ -557,7 +557,7 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: nuget-packages-${{ env.VERSION }}
+          name: nuget-packages-${{ env.RELEASE_VERSION }}
           path: ./packages/*.nupkg
           retention-days: 30
           if-no-files-found: warn
@@ -566,7 +566,7 @@ jobs:
         if: ${{ matrix.language == 'python' && env.PYTHON_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: python-packages-${{ env.VERSION }}
+          name: python-packages-${{ env.RELEASE_VERSION }}
           path: dist/*
           retention-days: 30
           if-no-files-found: warn
@@ -575,7 +575,7 @@ jobs:
         if: ${{ matrix.language == 'node' && env.NODE_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: node-packages-${{ env.VERSION }}
+          name: node-packages-${{ env.RELEASE_VERSION }}
           path: |
             *.tgz
             dist/
@@ -586,7 +586,7 @@ jobs:
         if: ${{ matrix.language == 'java' && env.JAVA_PRESENT == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: java-packages-${{ env.VERSION }}
+          name: java-packages-${{ env.RELEASE_VERSION }}
           path: |
             build/libs/*.jar
             target/*.jar
