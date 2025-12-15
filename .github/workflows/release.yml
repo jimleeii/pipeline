@@ -261,8 +261,9 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         id: dotnet-version
         run: |
+          BASE_VERSION="${{ needs.validate.outputs.version }}"
           BUILD_NUMBER=${{ github.run_number }}
-          VERSION="${{ env.VERSION }}.$BUILD_NUMBER"
+          VERSION="${BASE_VERSION}.${BUILD_NUMBER}"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building with version: $VERSION"
 
