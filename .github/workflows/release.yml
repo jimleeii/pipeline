@@ -246,7 +246,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup .NET
+      - name: Setup .NET 10
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         uses: actions/setup-dotnet@v4
         with:
@@ -261,9 +261,8 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         id: dotnet-version
         run: |
-          BASE_VERSION="${{ needs.validate.outputs.version }}"
           BUILD_NUMBER=${{ github.run_number }}
-          VERSION="${BASE_VERSION}.${BUILD_NUMBER}"
+          VERSION="${{ env.VERSION }}.$BUILD_NUMBER"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building with version: $VERSION"
 
@@ -413,7 +412,7 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         run: |
           dotnet pack --configuration Release --no-build \
-            -p:PackageVersion=${{ steps.dotnet-version.outputs.version }} \
+            -p:PackageVersion=${{ env.VERSION }} \
             -p:RepositoryUrl=${{ github.server_url }}/${{ github.repository }} \
             -p:RepositoryCommit=${{ github.sha }} \
             --output ./packages
@@ -439,6 +438,9 @@ jobs:
         run: |
           echo "🔐 Signing NuGet packages..."
           
+          # Install NuGet CLI tool
+          dotnet tool install --global NuGet.CommandLine
+          
           # Find all .nupkg files (excluding .symbols.nupkg)
           PACKAGES=$(find ./packages -name "*.nupkg" ! -name "*.symbols.nupkg")
           
@@ -458,11 +460,10 @@ jobs:
           
           for package in $PACKAGES; do
             echo "🔐 Signing package: $package"
-            if dotnet nuget sign "$package" \
-              --certificate-path /tmp/signing_cert.pfx \
-              --certificate-password "$SIGNING_CERTIFICATE_PASSWORD" \
-              --timestamper http://timestamp.digicert.com \
-              --overwrite; then
+            if nuget sign "$package" \
+              -CertificatePath /tmp/signing_cert.pfx \
+              -CertificatePassword "$SIGNING_CERTIFICATE_PASSWORD" \
+              -Timestamper http://timestamp.digicert.com -Overwrite; then
               ((SUCCESS_COUNT++))
               echo "✅ Successfully signed: $package"
             else
