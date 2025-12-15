@@ -244,7 +244,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup .NET 10
+      - name: Setup .NET
         if: ${{ matrix.language == 'dotnet' && env.DOTNET_PRESENT == 'true' }}
         uses: actions/setup-dotnet@v4
         with:
@@ -436,9 +436,6 @@ jobs:
         run: |
           echo "🔐 Signing NuGet packages..."
           
-          # Install NuGet CLI tool
-          dotnet tool install --global NuGet.CommandLine
-          
           # Find all .nupkg files (excluding .symbols.nupkg)
           PACKAGES=$(find ./packages -name "*.nupkg" ! -name "*.symbols.nupkg")
           
@@ -458,10 +455,11 @@ jobs:
           
           for package in $PACKAGES; do
             echo "🔐 Signing package: $package"
-            if nuget sign "$package" \
-              -CertificatePath /tmp/signing_cert.pfx \
-              -CertificatePassword "$SIGNING_CERTIFICATE_PASSWORD" \
-              -Timestamper http://timestamp.digicert.com -Overwrite; then
+            if dotnet nuget sign "$package" \
+              --certificate-path /tmp/signing_cert.pfx \
+              --certificate-password "$SIGNING_CERTIFICATE_PASSWORD" \
+              --timestamper http://timestamp.digicert.com \
+              --overwrite; then
               ((SUCCESS_COUNT++))
               echo "✅ Successfully signed: $package"
             else
