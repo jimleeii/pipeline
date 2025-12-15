@@ -30,10 +30,13 @@ permissions:
   id-token: write
 
 env:
+  VERSION: '1.0.0'
+
   NODE_VERSION: '20'
   PYTHON_VERSION: '3.11'
   DOTNET_VERSION: '10.0.x'
   JAVA_VERSION: '17'
+  
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
 
