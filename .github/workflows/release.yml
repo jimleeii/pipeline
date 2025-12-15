@@ -226,8 +226,8 @@ jobs:
       - name: Set version environment variable
         run: |
           {
-            echo "VERSION=${{ needs.validate.outputs.version }}"
-            echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}"
+            echo "VERSION=${{ steps.dotnet-version.outputs.version }}"
+            echo "IS_PRERELEASE=${{ steps.version.outputs.is_prerelease }}"
             echo "DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}"
             echo "DOCKERHUB_TOKEN=${{ secrets.DOCKERHUB_TOKEN }}"
           } >> "$GITHUB_ENV"
@@ -635,7 +635,7 @@ jobs:
           ## Artifacts
           
           - NuGet packages available at https://www.nuget.org/packages/
-          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ needs.validate.outputs.version }}`
+          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ steps.dotnet-version.outputs.version }}`
           
           **Full Changelog**: See the release page for detailed changes
           EOF
@@ -645,11 +645,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ needs.validate.outputs.version }}
-          name: Release v${{ needs.validate.outputs.version }}
+          tag_name: v${{ steps.dotnet-version.outputs.version }}
+          name: Release v${{ steps.dotnet-version.outputs.version }}
           body_path: release_notes.md
           draft: false
-          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
+          prerelease: ${{ steps.version.outputs.is_prerelease == 'true' }}
           files: |
             ./artifacts/**/*
           generate_release_notes: true
@@ -659,11 +659,11 @@ jobs:
       - name: Publish release summary
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          # 🎉 Release v${{ needs.validate.outputs.version }} Published
+          # 🎉 Release v${{ steps.dotnet-version.outputs.version }} Published
           
           ## Release Details
-          - **Version**: ${{ needs.validate.outputs.version }}
-          - **Prerelease**: ${{ needs.validate.outputs.is_prerelease }}
+          - **Version**: ${{ steps.dotnet-version.outputs.version }}
+          - **Prerelease**: ${{ steps.version.outputs.is_prerelease }}
           - **Commit**: ${{ github.sha }}
           
           ## Published Artifacts
@@ -672,7 +672,7 @@ jobs:
           - ✅ GitHub Release created
           
           ## Links
-          - [Release Page](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ needs.validate.outputs.version }})
+          - [Release Page](${{ github.server_url }}/${{ github.repository }}/releases/tag/v${{ steps.dotnet-version.outputs.version }})
           - [NuGet Gallery](https://www.nuget.org/packages/)
           EOF
 
@@ -690,8 +690,8 @@ jobs:
             github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: `🔴 Release v${{ needs.validate.outputs.version }} Failed`,
-              body: `Release workflow failed for version ${{ needs.validate.outputs.version }}.
+              title: `🔴 Release v${{ steps.dotnet-version.outputs.version }} Failed`,
+              body: `Release workflow failed for version ${{ steps.dotnet-version.outputs.version }}.
               
               **Details:**
               - Run ID: ${{ github.run_id }}
