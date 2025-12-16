@@ -259,7 +259,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Setup .NET 10
+      - name: Setup .NET
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
         uses: actions/setup-dotnet@v4
         with:
@@ -310,6 +310,7 @@ jobs:
           if not version:
               print("❌ Error: Version is empty")
               sys.exit(1)
+          print(f"📝 Updating .NET project versions to {version}")
           
           # Update all .csproj files
           for csproj_file in glob.glob("**/*.csproj", recursive=True):
