@@ -310,7 +310,6 @@ jobs:
           if not version:
               print("❌ Error: Version is empty")
               sys.exit(1)
-          print(f"📝 Updating .NET project versions to {version}")
           
           # Update all .csproj files
           for csproj_file in glob.glob("**/*.csproj", recursive=True):
@@ -328,6 +327,7 @@ jobs:
                   version_elem = property_group.find('.//Version')
                   if version_elem is not None:
                       version_elem.text = version
+                      print(f"✅ Updated Version in {csproj_file} to {version}")
                   
                   # Update AssemblyVersion element if present
                   assembly_version_elem = property_group.find('.//AssemblyVersion')
