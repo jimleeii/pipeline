@@ -314,26 +314,42 @@ jobs:
           # Update all .csproj files
           for csproj_file in glob.glob("**/*.csproj", recursive=True):
               try:
-                  ET.register_namespace('', 'http://schemas.microsoft.com/developer/msbuild/2003')
                   tree = ET.parse(csproj_file)
                   root = tree.getroot()
-                  ns = {'msbuild': 'http://schemas.microsoft.com/developer/msbuild/2003'}
+
+                  # Find the <PropertyGroup> element
+                  property_group = root.find('.//PropertyGroup')
+                  if property_group is None:
+                      print(f"❌ No PropertyGroup found in {csproj_file}")
+                      continue
                   
                   # Update Version element
-                  version_elem = root.find('msbuild:Version', ns)
-                  if version_elem is None:
-                      version_elem = root.find('Version')
+                  version_elem = property_group.find('.//Version')
                   if version_elem is not None:
                       version_elem.text = version
                   
-                  # Update PackageVersion element if present
-                  pkg_version_elem = root.find('msbuild:PackageVersion', ns)
-                  if pkg_version_elem is None:
-                      pkg_version_elem = root.find('PackageVersion')
-                  if pkg_version_elem is not None:
-                      pkg_version_elem.text = version
+                  # Update AssemblyVersion element if present
+                  assembly_version_elem = property_group.find('.//AssemblyVersion')
+                  if assembly_version_elem is not None:
+                      assembly_version_elem.text = version
                   
-                  tree.write(csproj_file, encoding='utf-8', xml_declaration=True)
+                  # Update FileVersion element if present
+                  file_version_elem = property_group.find('.//FileVersion')
+                  if file_version_elem is not None:
+                      file_version_elem.text = version
+
+                  # Update InformationalVersion element if present
+                  informational_version_elem = property_group.find('.//InformationalVersion')
+                  if informational_version_elem is not None:
+                      informational_version_elem.text = version
+
+                  # Update PackageVersion element if present
+                  package_version_elem = property_group.find('.//PackageVersion')
+                  if package_version_elem is not None:
+                      package_version_elem.text = version
+
+                  # Save changes back to the .csproj file
+                  tree.write(csproj_file, encoding='utf-8', xml_declaration=False)
                   print(f"✅ Updated {csproj_file} to version {version}")
               except Exception as e:
                   print(f"❌ Error updating {csproj_file}: {e}")
@@ -342,15 +358,20 @@ jobs:
           # Update Directory.Packages.props if it exists
           for props_file in glob.glob("Directory.Packages.props"):
               try:
-                  ET.register_namespace('', 'http://schemas.microsoft.com/developer/msbuild/2003')
                   tree = ET.parse(props_file)
                   root = tree.getroot()
-                  ns = {'msbuild': 'http://schemas.microsoft.com/developer/msbuild/2003'}
+
+                  # Find the <PropertyGroup> element
+                  property_group = root.find('.//PropertyGroup')
+                  if property_group is None:
+                      print(f"❌ No PropertyGroup found in {csproj_file}")
+                      continue
                   
-                  for version_elem in root.findall('.//msbuild:Version', ns) + root.findall('.//Version'):
+                  # Update Version elements
+                  for version_elem in property_group.findall('.//Version'):
                       version_elem.text = version
                   
-                  tree.write(props_file, encoding='utf-8', xml_declaration=True)
+                  tree.write(props_file, encoding='utf-8', xml_declaration=False)
                   print(f"✅ Updated {props_file} to version {version}")
               except Exception as e:
                   print(f"❌ Error updating {props_file}: {e}")

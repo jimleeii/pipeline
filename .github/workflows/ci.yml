@@ -177,16 +177,6 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-nuget-
 
-    # Calculate build version for .NET
-    - name: Calculate .NET version
-      if: steps.detect.outputs.project_type == 'dotnet'
-      id: dotnet-version
-      run: |
-        BUILD_NUMBER=${{ github.run_number }}
-        VERSION="${{ env.RELEASE_VERSION }}.$BUILD_NUMBER"
-        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-        echo "Building with version: $VERSION"
-
     # =============== Java ===============
     - name: Set up Java and cache Maven/Gradle
       if: steps.detect.outputs.project_type == 'java'
@@ -195,9 +185,6 @@ jobs:
         java-version: ${{ env.JAVA_VERSION }}
         distribution: 'temurin'
         cache: ${{ steps.detect.outputs.java_cache }}
-
-    # Note: setup-java@v4 auto-caches Maven/Gradle using hashFiles() internally when `cache:` is set.
-    # So no extra cache step is needed for Java.
 
     # =============== Install Dependencies ===============
     - name: Install dependencies
@@ -252,12 +239,7 @@ jobs:
             npm run build --if-present
             ;;
           dotnet)
-            VERSION="${{ steps.dotnet-version.outputs.version }}"
-            dotnet build --no-restore \
-              /p:Version=$VERSION \
-              /p:AssemblyVersion=$VERSION \
-              /p:FileVersion=$VERSION \
-              /p:InformationalVersion=$VERSION || {
+            dotnet build --no-restore || {
               echo "❌ Error: .NET build failed"
               exit 1
             }
