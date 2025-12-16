@@ -306,7 +306,7 @@ jobs:
           import sys
           import os
           
-          version = os.environ.get("$VERSION", "")
+          version = os.environ.get("VERSION", "")
           if not version:
               print("❌ Error: Version is empty")
               sys.exit(1)
