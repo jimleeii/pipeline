@@ -158,37 +158,68 @@ jobs:
       - name: Detect active languages
         id: detect
         run: |
-          LANGUAGES=()
-          
-          if [ -f package.json ]; then
+          set -euo pipefail
+
+          # Ensure we are in bash (arrays require it)
+          if [ -z "${BASH_VERSION:-}" ]; then
+            echo "❌ Error: This step requires Bash (array syntax)."
+            exit 1
+          fi
+
+          declare -a LANGUAGES=()
+
+          # Helper: fast "exists anywhere" check
+          has_anywhere() {
+            # $1 is a find expression, e.g. -name package.json -type f
+            # Use -print -quit to stop at first match
+            if find . "$@" -print -quit 2>/dev/null | grep -q .; then
+              return 0
+            else
+              return 1
+            fi
+          }
+
+          # Node.js (package.json anywhere)
+          if has_anywhere -name "package.json" -type f; then
             LANGUAGES+=(node)
           fi
-          
-          if [ -f pyproject.toml ] || [ -f requirements.txt ]; then
+
+          # Python (pyproject.toml or requirements.txt anywhere)
+          if has_anywhere -name "pyproject.toml" -type f || has_anywhere -name "requirements.txt" -type f; then
             LANGUAGES+=(python)
           fi
-          
-          if find . -name "*.csproj" -type f | grep -q .; then
+
+          # .NET (*.csproj anywhere)
+          if has_anywhere -name "*.csproj" -type f; then
             LANGUAGES+=(dotnet)
           fi
-          
-          if [ -f pom.xml ] || [ -f build.gradle ]; then
+
+          # Java (Maven or Gradle anywhere; include Kotlin DSL)
+          if has_anywhere -name "pom.xml" -type f || has_anywhere -name "build.gradle" -type f || has_anywhere -name "build.gradle.kts" -type f; then
             LANGUAGES+=(java)
           fi
-          
+
+          # No detections?
           if [ ${#LANGUAGES[@]} -eq 0 ]; then
             echo "❌ Error: No supported project types detected"
             exit 1
           fi
-          
-          # Convert array to JSON array format
-          LANGUAGES_JSON=$(printf '%s\n' "${LANGUAGES[@]}" | jq -R . | jq -sc .)
+
+          # Create JSON array safely (prefer jq if available)
+          LANGUAGES_JSON=""
+          if command -v jq >/dev/null 2>&1; then
+            LANGUAGES_JSON=$(printf '%s\n' "${LANGUAGES[@]}" | jq -R . | jq -sc .)
+          else
+            # Fallback: manual JSON build without jq
+            # Tokens are simple and safe (no quotes/spaces), so we can join manually
+            LANGUAGES_JSON="[\"$(IFS=\",\"; echo "${LANGUAGES[*]}")\"]"
+          fi
+
+          # Emit GitHub Action outputs
           {
             echo "languages=$LANGUAGES_JSON"
             echo "has-languages=true"
           } >> "$GITHUB_OUTPUT"
-          
-          echo "✅ Detected languages: $(IFS=, ; echo "${LANGUAGES[*]}")"
 
   release:
     name: Release (${{ matrix.language }})
@@ -209,48 +240,58 @@ jobs:
       - name: Detect project types
         id: detect
         run: |
-          # Align detection with ci.yml so both workflows evaluate project types the same way
+          # Fail fast & be strict
+          set -euo pipefail
+
+          # Initialize detection flags
           NODE_PRESENT=false
           PYTHON_PRESENT=false
           DOTNET_PRESENT=false
           JAVA_PRESENT=false
           DOCKERFILE_PRESENT=false
 
-          if [ -f package.json ]; then
+          # Node.js: detect package.json anywhere
+          if find . -type f -name 'package.json' -print -quit | grep -q .; then
             NODE_PRESENT=true
           fi
 
-          if [ -f requirements.txt ] || [ -f pyproject.toml ]; then
+          # Python: requirements.txt or pyproject.toml anywhere
+          if find . -type f \( -name 'requirements.txt' -o -name 'pyproject.toml' \) -print -quit | grep -q .; then
             PYTHON_PRESENT=true
           fi
 
-          if find . -name "*.csproj" -type f | grep -q .; then
+          # .NET: *.csproj anywhere
+          if find . -type f -name '*.csproj' -print -quit | grep -q .; then
             DOTNET_PRESENT=true
           fi
 
-          if [ -f pom.xml ] || [ -f build.gradle ]; then
+          # Java/Gradle/Maven: pom.xml, build.gradle, build.gradle.kts anywhere
+          if find . -type f \( -name 'pom.xml' -o -name 'build.gradle' -o -name 'build.gradle.kts' \) -print -quit | grep -q .; then
             JAVA_PRESENT=true
           fi
 
-          if [ -f Dockerfile ]; then
+          # Dockerfile: anywhere
+          if find . -type f -name 'Dockerfile' -print -quit | grep -q .; then
             DOCKERFILE_PRESENT=true
           fi
 
+          # Export to environment (for later steps)
           {
-            echo "NODE_PRESENT=$NODE_PRESENT"
-            echo "PYTHON_PRESENT=$PYTHON_PRESENT"
-            echo "DOTNET_PRESENT=$DOTNET_PRESENT"
-            echo "JAVA_PRESENT=$JAVA_PRESENT"
-            echo "DOCKERFILE_PRESENT=$DOCKERFILE_PRESENT"
+            printf 'NODE_PRESENT=%s\n' "$NODE_PRESENT"
+            printf 'PYTHON_PRESENT=%s\n' "$PYTHON_PRESENT"
+            printf 'DOTNET_PRESENT=%s\n' "$DOTNET_PRESENT"
+            printf 'JAVA_PRESENT=%s\n' "$JAVA_PRESENT"
+            printf 'DOCKERFILE_PRESENT=%s\n' "$DOCKERFILE_PRESENT"
           } >> "$GITHUB_ENV"
 
+          # Emit step outputs (for job-level conditionals)
           {
-            echo "node_present=$NODE_PRESENT"
-            echo "python_present=$PYTHON_PRESENT"
-            echo "dotnet_present=$DOTNET_PRESENT"
-            echo "java_present=$JAVA_PRESENT"
-            echo "dockerfile_present=$DOCKERFILE_PRESENT"
-          } >> "$GITHUB_OUTPUT"
+            printf 'node_present=%s\n' "$NODE_PRESENT"
+            printf 'python_present=%s\n' "$PYTHON_PRESENT"
+            printf 'dotnet_present=%s\n' "$DOTNET_PRESENT"
+            printf 'java_present=%s\n' "$JAVA_PRESENT"
+            printf 'dockerfile_present=%s\n' "$DOCKERFILE_PRESENT"
+          }
 
       - name: Set version environment variable
         run: |
@@ -305,92 +346,129 @@ jobs:
       - name: Update .NET project versions
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
         run: |
-          VERSION="${{ steps.dotnet-version.outputs.version }}"
-          if [ -z "$VERSION" ]; then 
-            echo "❌ Error: Version not set!"
-            exit 1
-          fi
+          # Strict mode for bash
+          set -euo pipefail
+
+          # Export VERSION for Python
+          export VERSION="${{ steps.dotnet-version.outputs.version }}"
 
           echo "📝 Updating .NET project versions to $VERSION"
-          
-          # Use Python with proper XML parsing to safely update .csproj files
-          python3 << PYTHON_EOF
+
+          python3 << 'PYTHON_EOF'
           import xml.etree.ElementTree as ET
           import glob
-          import sys
           import os
-          
+          import sys
+          import re
+
           version = os.environ.get("VERSION", "")
           if not version:
-              print("❌ Error: Version is empty")
+              print("❌ Error: VERSION environment variable is empty")
               sys.exit(1)
-          
-          # Update all .csproj files
-          for csproj_file in glob.glob("**/*.csproj", recursive=True):
+
+          errors = []
+
+          # Detect namespace if present
+          def get_nsmap(root):
+              # Root.tag like '{namespace}Project' or 'Project'
+              if root.tag.startswith('{'):
+                  ns = root.tag.split('}')[0].strip('{')
+                  return {'msb': ns}
+              return {}  # no namespace
+
+          def q(nsmap, name):
+              # Qualified tag name if namespace present
+              if nsmap:
+                  return f'{{{nsmap["msb"]}}}{name}'
+              return name
+
+          # SemVer → assembly/file version (4-part)
+          def to_four_part(v: str) -> str:
+              # Extract major.minor.patch; ignore prerelease/metadata
+              m = re.match(r'^(\d+)\.(\d+)\.(\d+)', v)
+              if not m:
+                  # Fallback: if only major.minor, add .0.0; if single, add .0.0.0
+                  parts = v.split('.')
+                  while len(parts) < 4:
+                      parts.append('0')
+                  return '.'.join(parts[:4])
+              major, minor, patch = m.groups()
+              return f'{major}.{minor}.{patch}.0'
+
+          asm_file_version = to_four_part(version)
+
+          def upsert_text(parent, tag, text, nsmap):
+              elem = parent.find(tag) if not nsmap else parent.find(f'.//{q(nsmap, tag)}')
+              if elem is None:
+                  elem = ET.SubElement(parent, q(nsmap, tag))
+              elem.text = text
+
+          def find_or_create_property_group(root, nsmap):
+              # Prefer a PropertyGroup without Condition
+              for pg in root.findall(q(nsmap, 'PropertyGroup')):
+                  if 'Condition' not in pg.attrib:
+                      return pg
+              # Otherwise, create one
+              return ET.SubElement(root, q(nsmap, 'PropertyGroup'))
+
+          def update_csproj(path):
+              tree = ET.parse(path)
+              root = tree.getroot()
+              nsmap = get_nsmap(root)
+
+              pg = find_or_create_property_group(root, nsmap)
+
+              # Package/project versions (SemVer)
+              upsert_text(pg, 'Version', version, nsmap)
+              upsert_text(pg, 'PackageVersion', version, nsmap)
+              upsert_text(pg, 'InformationalVersion', version, nsmap)
+
+              # Assembly/file versions (4-part)
+              upsert_text(pg, 'AssemblyVersion', asm_file_version, nsmap)
+              upsert_text(pg, 'FileVersion', asm_file_version, nsmap)
+
+              tree.write(path, encoding='utf-8', xml_declaration=True)
+
+          def update_directory_packages_props(path):
+              tree = ET.parse(path)
+              root = tree.getroot()
+              nsmap = get_nsmap(root)
+
+              # Update top-level Version if present
+              for pg in root.findall(q(nsmap, 'PropertyGroup')):
+                  for ve in pg.findall(q(nsmap, 'Version')):
+                      ve.text = version
+
+              # Update ItemGroup/PackageVersion Version attributes
+              for ig in root.findall(q(nsmap, 'ItemGroup')):
+                  for pv in ig.findall(q(nsmap, 'PackageVersion')):
+                      if 'Version' in pv.attrib:
+                          pv.attrib['Version'] = version
+
+              tree.write(path, encoding='utf-8', xml_declaration=True)
+
+          # Process all .csproj files
+          for csproj in glob.glob("**/*.csproj", recursive=True):
               try:
-                  tree = ET.parse(csproj_file)
-                  root = tree.getroot()
-
-                  # Find the <PropertyGroup> element
-                  property_group = root.find('.//PropertyGroup')
-                  if property_group is None:
-                      print(f"❌ No PropertyGroup found in {csproj_file}")
-                      continue
-                  
-                  # Update Version element
-                  version_elem = property_group.find('.//Version')
-                  if version_elem is not None:
-                      version_elem.text = version
-                  
-                  # Update AssemblyVersion element if present
-                  assembly_version_elem = property_group.find('.//AssemblyVersion')
-                  if assembly_version_elem is not None:
-                      assembly_version_elem.text = version
-                  
-                  # Update FileVersion element if present
-                  file_version_elem = property_group.find('.//FileVersion')
-                  if file_version_elem is not None:
-                      file_version_elem.text = version
-
-                  # Update InformationalVersion element if present
-                  informational_version_elem = property_group.find('.//InformationalVersion')
-                  if informational_version_elem is not None:
-                      informational_version_elem.text = version
-
-                  # Update PackageVersion element if present
-                  package_version_elem = property_group.find('.//PackageVersion')
-                  if package_version_elem is not None:
-                      package_version_elem.text = version
-
-                  # Save changes back to the .csproj file
-                  tree.write(csproj_file, encoding='utf-8', xml_declaration=False)
-                  print(f"✅ Updated {csproj_file} to version {version}")
+                  update_csproj(csproj)
+                  print(f"✅ Updated {csproj} to version {version} (asm/file: {asm_file_version})")
               except Exception as e:
-                  print(f"❌ Error updating {csproj_file}: {e}")
-                  sys.exit(1)
-          
-          # Update Directory.Packages.props if it exists
-          for props_file in glob.glob("Directory.Packages.props"):
+                  errors.append(f"{csproj}: {e}")
+
+          # Process Directory.Packages.props if present
+          for props in glob.glob("Directory.Packages.props"):
               try:
-                  tree = ET.parse(props_file)
-                  root = tree.getroot()
-
-                  # Find the <PropertyGroup> element
-                  property_group = root.find('.//PropertyGroup')
-                  if property_group is None:
-                      print(f"❌ No PropertyGroup found in {csproj_file}")
-                      continue
-                  
-                  # Update Version elements
-                  for version_elem in property_group.findall('.//Version'):
-                      version_elem.text = version
-                  
-                  tree.write(props_file, encoding='utf-8', xml_declaration=False)
-                  print(f"✅ Updated {props_file} to version {version}")
+                  update_directory_packages_props(props)
+                  print(f"✅ Updated {props} to version {version}")
               except Exception as e:
-                  print(f"❌ Error updating {props_file}: {e}")
-                  sys.exit(1)
-          
+                  errors.append(f"{props}: {e}")
+
+          if errors:
+              print("❌ Some updates failed:")
+              for err in errors:
+                  print        print(f"   - {err}")
+              sys.exit(1)
+
           print("✅ All .NET project versions updated successfully")
           PYTHON_EOF
 
