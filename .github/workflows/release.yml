@@ -427,7 +427,7 @@ jobs:
               upsert_text(pg, 'AssemblyVersion', asm_file_version, nsmap)
               upsert_text(pg, 'FileVersion', asm_file_version, nsmap)
 
-              tree.write(path, encoding='utf-8', xml_declaration=True)
+              tree.write(path, encoding='utf-8', xml_declaration=False)
 
           def update_directory_packages_props(path):
               tree = ET.parse(path)
@@ -445,7 +445,7 @@ jobs:
                       if 'Version' in pv.attrib:
                           pv.attrib['Version'] = version
 
-              tree.write(path, encoding='utf-8', xml_declaration=True)
+              tree.write(path, encoding='utf-8', xml_declaration=False)
 
           # Process all .csproj files
           for csproj in glob.glob("**/*.csproj", recursive=True):
@@ -704,7 +704,7 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: nuget-packages-${{ env.RELEASE_VERSION }}
+          name: nuget-packages-${{ steps.dotnet-version.outputs.version }}
           path: ./packages/*.nupkg
           retention-days: 30
           if-no-files-found: warn
