@@ -490,7 +490,9 @@ jobs:
       - name: Build (.NET)
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
         run: |
-          dotnet build --configuration Release --no-restore /p:ContinuousIntegrationBuild=true
+          VERSION="${{ steps.dotnet-version.outputs.version }}"
+          dotnet build --configuration Release --no-restore /p:ContinuousIntegrationBuild=true \
+            /p:Version=$VERSION /p:AssemblyVersion=$VERSION /p:FileVersion=$VERSION /p:InformationalVersion=$VERSION
           
       - name: Build (Java)
         if: ${{ matrix.language == 'java' && steps.detect.outputs.java_present == 'true' }}
