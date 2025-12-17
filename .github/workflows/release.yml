@@ -22,7 +22,7 @@ on:
         description: 'Publish Docker image to Docker Hub (if false, only build for download)'
         required: false
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: write
