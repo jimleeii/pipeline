@@ -291,12 +291,10 @@ jobs:
             printf 'dotnet_present=%s\n' "$DOTNET_PRESENT"
             printf 'java_present=%s\n' "$JAVA_PRESENT"
             printf 'dockerfile_present=%s\n' "$DOCKERFILE_PRESENT"
-          }
+          } >> "$GITHUB_OUTPUT"
 
       - name: Set version environment variable
         run: |
-          echo ${{ steps.detect.outputs.dotnet_present }}
-          
           {
             echo "VERSION=${{ needs.validate.outputs.version }}"
             echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}"
