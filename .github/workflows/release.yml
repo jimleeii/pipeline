@@ -59,75 +59,89 @@ jobs:
       - name: Validate and determine version
         id: version
         run: |
-          set -e  # Exit on any error
-          
-          # Initialize outputs with empty values (prevents null reference errors downstream)
+          set -euo pipefail
+
+          # Initialize outputs
           VERSION=""
           IS_PRERELEASE="false"
           VERSION_FOUND="false"
-          
-          # Determine version based on trigger type
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+
+          EVENT_NAME="${{ github.event_name }}"
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "ℹ️  Manual release triggered"
             VERSION="${{ github.event.inputs.version }}"
-            
-            if [ -z "$VERSION" ]; then
+            # Trim whitespace just in case
+            VERSION="${VERSION//[[:space:]]/}"
+
+            if [[ -z "$VERSION" ]]; then
               echo "❌ Error: Version input is required for manual releases"
               exit 1
             fi
             VERSION_FOUND="true"
-          elif [[ "${{ github.event_name }}" == "workflow_run" ]]; then
+
+          elif [[ "$EVENT_NAME" == "workflow_run" ]]; then
             echo "ℹ️  Automated release triggered from CI completion"
-            git fetch --tags --quiet
+            git fetch --tags --quiet || true
             HEAD_SHA="${{ github.event.workflow_run.head_sha }}"
-            
-            # Look for version tag on current commit
-            VERSION_TAG=$(git tag --points-at "$HEAD_SHA" | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
-            
-            if [ -z "$VERSION_TAG" ]; then
+
+            # Look for version tag on current commit (allow base SemVer tag only; widen if needed)
+            VERSION_TAG=$(git tag --points-at "$HEAD_SHA" \
+              | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' \
+              | head -n1 || true)
+
+            if [[ -z "$VERSION_TAG" ]]; then
               echo "ℹ️  No version tag found on commit $HEAD_SHA - release not needed"
-              # This is normal for feature branches - set outputs and exit cleanly
               {
-                echo "version="
-                echo "is_prerelease=false"
-                echo "version_found=false"
+                printf 'version=\n'
+                printf 'is_prerelease=false\n'
+                printf 'version_found=false\n'
               } >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            
+
             VERSION="${VERSION_TAG#v}"
             echo "ℹ️  Found version tag: v$VERSION"
             VERSION_FOUND="true"
+
           else
-            # Fallback for other trigger types
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            VERSION_FOUND="true"
+            # Fallback for other trigger types: only use if this is a tag ref 'refs/tags/v*'
+            if [[ "${GITHUB_REF:-}" =~ ^refs/tags/v ]]; then
+              VERSION="${GITHUB_REF#refs/tags/v}"
+              VERSION_FOUND="true"
+            else
+              echo "ℹ️  Fallback trigger without tag ref; no version found"
+              VERSION_FOUND="false"
+            fi
           fi
-          
+
           # Validate semantic version format (X.Y.Z with optional prerelease/build)
-          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]; then
-            echo "❌ Error: Invalid semantic version format: $VERSION"
-            echo "Expected format: X.Y.Z (e.g., 1.0.0, 1.0.0-beta.1, 1.0.0+build.123)"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?(\+[A-Za-z0-9.-]+)?$ ]]; then
+            echo "❌ Error: Invalid semantic version format: '$VERSION'"
+            echo "Expected: X.Y.Z (e.g., 1.0.0, 1.0.0-beta.1, 1.0.0+build.123)"
             exit 1
           fi
-          
+
           # Determine if prerelease (contains hyphen in version)
-          if [[ "$VERSION" =~ - ]]; then
+          if [[ "$VERSION" == *-* ]]; then
             IS_PRERELEASE="true"
           else
             IS_PRERELEASE="false"
           fi
+
           {
-            echo "version=$VERSION"
-            echo "is_prerelease=$IS_PRERELEASE"
-            echo "version_found=$VERSION_FOUND"
-          } >> "$GITHUB_OUTPUT"
-          echo "✅ Version validated: $VERSION (prerelease: $IS_PRERELEASE)"
+            printf 'version=%s\n' "$VERSION"
+            printf 'is_prerelease=%s\n' "$IS_PRERELEASE"
+            printf 'version_found=%s\n' "$VERSION_FOUND"
+          }} >> "$GITHUB_OUTPUT"
 
       - name: Check for duplicate release
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          if git rev-parse "v$VERSION" >/dev/null 2>&1 && [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+
+          # Only warn on workflow_dispatch and if the tag exists
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] \
+            && git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
             echo "⚠️  Warning: Tag v$VERSION already exists"
           fi
 
