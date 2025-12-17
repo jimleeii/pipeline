@@ -334,7 +334,7 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building with version: $VERSION"
 
-      - name: Setup Java 17
+      - name: Setup Java
         if: ${{ matrix.language == 'java' && steps.detect.outputs.java_present == 'true' }}
         uses: actions/setup-java@v4
         with:
