@@ -671,6 +671,13 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       # Unified Docker build and push (avoids code duplication)
       - name: Build and push Docker image
         if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' }}
@@ -679,12 +686,12 @@ jobs:
           context: .
           push: ${{ github.event.inputs.docker_publish_to_hub != 'false' }}
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ env.RELEASE_VERSION }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME || github.actor }}/${{ github.event.repository.name }}:${{ steps.dotnet-version.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME || github.actor }}/${{ github.event.repository.name }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ env.RELEASE_VERSION }}
+            org.opencontainers.image.version=${{ steps.dotnet-version.outputs.version }}
             org.opencontainers.image.created=${{ github.event.repository.updated_at }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -696,8 +703,8 @@ jobs:
         if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' && github.event.inputs.docker_publish_to_hub == 'false' }}
         uses: actions/upload-artifact@v4
         with:
-          name: docker-image-${{ matrix.language }}-${{ env.RELEASE_VERSION }}
-          path: /tmp/${{ github.event.repository.name }}-${{ env.RELEASE_VERSION }}.tar
+          name: docker-image-${{ matrix.language }}-${{ steps.dotnet-version.outputs.version }}
+          path: /tmp/${{ github.event.repository.name }}-${{ steps.dotnet-version.outputs.version }}.tar
           retention-days: 30
           if-no-files-found: warn
 
