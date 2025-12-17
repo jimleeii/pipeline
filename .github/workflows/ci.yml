@@ -318,7 +318,7 @@ jobs:
       run: |
         set -euo pipefail
 
-        project_type="${{ steps.detect.outputs.project_type :-unknown }}"
+        project_type="${{ steps.detect.outputs.project_type || 'unknown' }}"
 
         case "$project_type" in
           node)
