@@ -503,7 +503,7 @@ jobs:
                 else
                   echo "❌ Error: build.gradle found but no gradlew wrapper and gradle not installed – use Gradle wrapper"
                   exit 1
-                }
+                fi
               fi
             fi
             ;;
