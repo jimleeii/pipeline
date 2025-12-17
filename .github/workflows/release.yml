@@ -466,7 +466,7 @@ jobs:
           if errors:
               print("❌ Some updates failed:")
               for err in errors:
-                  print        print(f"   - {err}")
+                  print(f"   - {err}")
               sys.exit(1)
 
           print("✅ All .NET project versions updated successfully")
