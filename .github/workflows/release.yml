@@ -626,30 +626,35 @@ jobs:
 
       # === Publish to NuGet.org ===
       - name: Publish to NuGet.org
-        if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' && github.event.inputs.dry_run != 'true' }}
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: bash
         run: |
-          if [ -z "${{ secrets.NUGET_API_KEY }}" ]; then
+          set -euo pipefail
+
+          # Ensure dotnet is available
+          if [ -z "${NUGET_API_KEY:-}" ]; then
             echo "⚠️  NUGET_API_KEY not set, skipping NuGet publish"
             exit 0
           fi
           
-          # Find all .nupkg files (excluding .symbols.nupkg)
-          PACKAGES=$(find ./packages -name "*.nupkg" ! -name "*.symbols.nupkg")
-          
-          if [ -z "$PACKAGES" ]; then
-            echo "❌ No packages found to publish"
-            exit 1
-          fi
-          
-          for package in $PACKAGES; do
+          # Find all .nupkg files (excluding .symbols.nupkg), safely handle spaces
+          found_packages=false
+          while IFS= read -r -d '' package; do
+            found_packages=true
             echo "📦 Publishing: $package"
             dotnet nuget push "$package" \
-              --api-key "${{ secrets.NUGET_API_KEY }}" \
-              --source https://api.nuget.org/v3/index.json \
-              --skip-duplicate \
-              --no-symbols
-          done
+              --api-key "$NUGET_API_KEY" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --skip-duplicate
+          done < <(find ./packages -type f -name '*.nupkg' ! -name '*.symbols.nupkg' -print0)
           
+          # Fail if no packages were found
+          if [ "$found_packages" = false ]; then
+            echo "❌ No packages found to publish"
+                exit 1
+          fi
+
           echo "✅ NuGet packages published successfully"
 
       # === Docker Setup ===
@@ -754,34 +759,74 @@ jobs:
       - name: Generate changelog
         id: changelog
         run: |
-          # Find previous tag (only for actual releases, not first release)
-          PREVIOUS_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-          
-          if [ -z "$PREVIOUS_TAG" ]; then
+          set -euo pipefail
+
+          # Ensure tags are available (important for git describe and range logs)
+          git fetch --tags --prune --unshallow 2>/dev/null || git fetch --tags --prune
+
+          # Find previous tag (last reachable tag)
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 2>/dev/null || echo "")"
+
+          # Compute CHANGELOG
+          if [ -z "${PREVIOUS_TAG}" ]; then
             echo "📝 First release detected - including recent commits"
-            # For first release, limit to last 50 commits to avoid huge changelogs
-            CHANGELOG=$(git log --pretty=format:"- %s (%h)" --no-merges -50)
+            LIMIT="${CHANGELOG_LIMIT:-50}"
+            CHANGELOG="$(git log --pretty=format:"- %s (%h)" --no-merges -"${LIMIT}")"
+            # Optional: for Full Changelog link
+            FIRST_COMMIT="$(git rev-list --max-parents=0 HEAD | tail -n1)"
           else
-            echo "📝 Generating changelog since $PREVIOUS_TAG"
-            CHANGELOG=$(git log "${PREVIOUS_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges)
+            echo "📝 Generating changelog since ${PREVIOUS_TAG}"
+            CHANGELOG="$(git log "${PREVIOUS_TAG}"..HEAD --pretty=format:"- %s (%h)" --no-merges)"
           fi
-          
-          # Create output file (quote heredoc to avoid shell expansions/backticks)
+
+          # Fallback if no changes found
+          if [ -z "${CHANGELOG}" ]; then
+            CHANGELOG="- No non-merge commits since previous tag."
+          fi
+
+          # Optional: resolve Docker image and version if available in env
+          # Expect DOCKERHUB_USERNAME and VERSION provided by previous steps
+          DOCKER_IMAGE_LINE="- Docker images: \`docker pull \$\{DOCKERHUB_USERNAME\}/\${GITHUB_REPOSITORY##*/}:\${VERSION}\`"
+          if [ -n "${DOCKERHUB_USERNAME:-}" ] && [ -n "${VERSION:-}" ]; then
+            DOCKER_IMAGE_LINE="- Docker images: \`docker pull ${DOCKERHUB_USERNAME}/${GITHUB_REPOSITORY##*/}:${VERSION}\`"
+          fi
+
+          # Build release_notes.md (quote heredoc to avoid expansions)
           cat > release_notes.md << 'EOF'
           ## What's Changed
-          
+
           EOF
-          echo "$CHANGELOG" >> release_notes.md
+
+          # Append computed changelog
+          echo "${CHANGELOG}" >> release_notes.md
+
+          # Append artifacts
           cat >> release_notes.md << 'EOF'
-          
+
           ## Artifacts
-          
+
           - NuGet packages available at https://www.nuget.org/packages/
-          - Docker images: `docker pull ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ needs.validate.outputs.version }}`
-          
-          **Full Changelog**: See the release page for detailed changes
           EOF
-          
+
+          # Append Docker line (already built to allow expansion if values present)
+          echo "${DOCKER_IMAGE_LINE}" >> release_notes.md
+
+          # Append Full Changelog link
+          if [ -n "${PREVIOUS_TAG}" ]; then
+            echo "" >> release_notes.md
+            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${PREVIOUS_TAG}...${GITHUB_SHA}" >> release_notes.md
+          else
+            # First release: compare from initial commit
+            if [ -n "${FIRST_COMMIT:-}" ]; then
+              echo "" >> release_notes.md
+              echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${FIRST_COMMIT}...${GITHUB_SHA}" >> release_notes.md
+            else
+              echo "" >> release_notes.md
+              echo "**Full Changelog**: See the release page for detailed changes" >> release_notes.md
+            fi
+          fi
+
+          # Expose output
           echo "changelog_file=release_notes.md" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
