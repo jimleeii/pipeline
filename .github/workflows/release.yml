@@ -295,6 +295,8 @@ jobs:
 
       - name: Set version environment variable
         run: |
+          echo ${{ steps.detect.outputs.dotnet_present }}
+          
           {
             echo "VERSION=${{ needs.validate.outputs.version }}"
             echo "IS_PRERELEASE=${{ needs.validate.outputs.is_prerelease }}"
