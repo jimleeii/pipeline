@@ -684,7 +684,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
-        if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.docker_publish_to_hub == 'false'}}
+        if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' }}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
