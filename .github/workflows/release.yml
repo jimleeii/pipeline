@@ -684,22 +684,23 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Login to GitHub Container Registry
+        if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.docker_publish_to_hub == 'false'}}
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Unified Docker build and push (avoids code duplication)
-      - name: Build and push Docker image
-        if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' }}
+      # Build and push to Docker Hub (if credentials available)
+      - name: Build and push Docker image to Docker Hub
+        if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' && github.event.inputs.docker_publish_to_hub != 'false' && steps.docker-hub-check.outputs.available == 'true' }}
         uses: docker/build-push-action@v6
         with:
           context: ./src/csharp
-          push: ${{ github.event.inputs.docker_publish_to_hub != 'false' }}
+          push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME || github.actor }}/${{ github.event.repository.name }}:${{ steps.dotnet-version.outputs.version }}
-            ${{ secrets.DOCKERHUB_USERNAME || github.actor }}/${{ github.event.repository.name }}:latest
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:${{ steps.dotnet-version.outputs.version }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}:latest
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -708,7 +709,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
-          outputs: type=image
+
+      # Build and push to GitHub Container Registry (fallback or always)
+      - name: Build and push Docker image to GHCR
+        if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./src/csharp
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:${{ steps.dotnet-version.outputs.version }}
+            ghcr.io/${{ github.repository_owner }}/${{ github.event.repository.name }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.dotnet-version.outputs.version }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
 
       # Upload Docker image artifact (for download-only builds)
       - name: Upload Docker image artifact
