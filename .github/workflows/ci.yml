@@ -380,16 +380,16 @@ jobs:
       run: |
         set -euo pipefail
 
-        PROJECT_TYPE="${PROJECT_TYPE:-}"
+        project_type="${{ steps.detect.outputs.project_type || 'unknown' }}"
 
-        if [[ -z "$PROJECT_TYPE" ]]; then
-          echo "❌ Error: PROJECT_TYPE is empty or not set."
+        if [[ -z "$project_type" ]]; then
+          echo "❌ Error: project_type is empty or not set."
           exit 1
         fi
 
-        echo "ℹ️  Detected project type: $PROJECT_TYPE"
+        echo "ℹ️  Detected project type: $project_type"
 
-        case "$PROJECT_TYPE" in
+        case "$project_type" in
           node)
             # Ensure Node project structure
             if [[ ! -f package.json ]]; then
@@ -509,13 +509,12 @@ jobs:
             ;;
 
           *)
-            echo "❌ Error: No test command defined for project type: '$PROJECT_TYPE'"
+            echo "❌ Error: No test command defined for project type: '$project_type'"
             exit 1
             ;;
         esac
 
-        echo "✅ Tests completed successfully for: $PROJECT_TYPE"
-
+        echo "✅ Tests completed successfully for: $project_type"
 
     # =============== Upload Test Results ===============
     - name: Upload .NET test results
@@ -570,12 +569,19 @@ jobs:
       if: always()
       id: check-test-files
       run: |
-        TEST_FILES_FOUND=false
-        if find . -name "*.trx" -o -name "*.xml" | grep -q .; then
-          TEST_FILES_FOUND=true
+        set -euo pipefail
+
+        test_files_found=false
+
+        # Find the first matching test report file (fast) and check if any output was produced
+        if find . -type f \( -name '*.trx' -o -name '*.xml' \) -print -quit | grep -q .; then
+          test_files_found=true
+        else
+          test_files_found=false
         fi
-        echo "test_files_found=$TEST_FILES_FOUND" >> "$GITHUB_OUTPUT"
-        echo "Test report files found: $TEST_FILES_FOUND"
+
+        echo "test_files_found=$test_files_found" >> "$GITHUB_OUTPUT"
+        echo "Test report files found: $test_files_found"
     
     - name: Publish test results to GitHub Checks
       if: always() && steps.check-test-files.outputs.test_files_found == 'true'
