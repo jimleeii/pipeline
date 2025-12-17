@@ -695,7 +695,7 @@ jobs:
         if: ${{ steps.detect.outputs.dockerfile_present == 'true' && github.event.inputs.dry_run != 'true' }}
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./src/csharp
           push: ${{ github.event.inputs.docker_publish_to_hub != 'false' }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME || github.actor }}/${{ github.event.repository.name }}:${{ steps.dotnet-version.outputs.version }}
