@@ -133,7 +133,7 @@ jobs:
             printf 'version=%s\n' "$VERSION"
             printf 'is_prerelease=%s\n' "$IS_PRERELEASE"
             printf 'version_found=%s\n' "$VERSION_FOUND"
-          }} >> "$GITHUB_OUTPUT"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check for duplicate release
         run: |
@@ -563,48 +563,63 @@ jobs:
           SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
         run: |
+          set -euo pipefail
+
           echo "🔐 Signing NuGet packages..."
-          
-          # Install NuGet CLI tool
-          dotnet tool install --global NuGet.CommandLine
-          
-          # Find all .nupkg files (excluding .symbols.nupkg)
-          PACKAGES=$(find ./packages -name "*.nupkg" ! -name "*.symbols.nupkg")
-          
-          if [ -z "$PACKAGES" ]; then
+
+          # Ensure dotnet is available
+          if ! command -v dotnet >/dev/null 2>&1; then
+            echo "❌ dotnet SDK not found. Install .NET 6+ to use 'dotnet nuget sign'."
+            exit 1
+          fi
+
+          # Find all .nupkg files (excluding symbol packages)
+          mapfile -t PACKAGES < <(find ./packages -type f -name "*.nupkg" ! -name "*.symbols.nupkg")
+
+          if [[ ${#PACKAGES[@]} -eq 0 ]]; then
             echo "⚠️  No packages found to sign. Skipping signature step."
             exit 0
           fi
-          
-          # Create temporary certificate file from base64-encoded secret
-          echo "$SIGNING_CERTIFICATE" | base64 -d > /tmp/signing_cert.pfx 2>/dev/null || {
+
+          # Decode the base64-encoded PFX from secret into a temp file
+          CERT_FILE="$(mktemp -t signing_cert.XXXXXX.pfx)"
+          # On some shells, -w 0 ignores line wraps; harmless elsewhere
+          if ! echo "${SIGNING_CERTIFICATE}" | base64 -d > "${CERT_FILE}" 2>/dev/null; then
             echo "⚠️  Unable to decode SIGNING_CERTIFICATE. Ensure it's base64-encoded. Skipping signing."
+            rm -f "${CERT_FILE}"
             exit 0
-          }
-          
+          fi
+
           SUCCESS_COUNT=0
           FAIL_COUNT=0
-          
-          for package in $PACKAGES; do
-            echo "🔐 Signing package: $package"
-            if nuget sign "$package" \
-              -CertificatePath /tmp/signing_cert.pfx \
-              -CertificatePassword "$SIGNING_CERTIFICATE_PASSWORD" \
-              -Timestamper http://timestamp.digicert.com -Overwrite; then
+
+          for package in "${PACKAGES[@]}"; do
+            echo "🔐 Signing package: ${package}"
+            if dotnet nuget sign "${package}" \
+              --certificate-path "${CERT_FILE}" \
+              --certificate-password "${SIGNING_CERTIFICATE_PASSWORD}" \
+              --timestamper "http://timestamp.digicert.com" \
+              --overwrite \
+              --timestamp-hash-algorithm sha256 \
+              --verbosity minimal; then
               ((SUCCESS_COUNT++))
-              echo "✅ Successfully signed: $package"
+              echo "✅ Successfully signed: ${package}"
             else
               ((FAIL_COUNT++))
-              echo "⚠️  Failed to sign: $package (Ensure SIGNING_CERTIFICATE and SIGNING_CERTIFICATE_PASSWORD secrets are set correctly)"
+              echo "⚠️  Failed to sign: ${package} (check SIGNING_CERTIFICATE / SIGNING_CERTIFICATE_PASSWORD)"
             fi
           done
-          
-          # Clean up certificate file
-          rm -f /tmp/signing_cert.pfx
-          
-          if [ $FAIL_COUNT -gt 0 ]; then
-            echo "⚠️  Signed $SUCCESS_COUNT package(s), failed to sign $FAIL_COUNT package(s)"
-            echo "ℹ️  Set up signing by adding SIGNING_CERTIFICATE (base64-encoded .pfx) and SIGNING_CERTIFICATE_PASSWORD to repository secrets"
+
+          # Clean up certificate file securely (Linux-only best effort)
+          if command -v shred >/dev/null 2>&1; then
+            shred -u "${CERT_FILE}"
+          else
+            rm -f "${CERT_FILE}"
+          fi
+
+          if [[ ${FAIL_COUNT} -gt 0 ]]; then
+            echo "⚠️  Signed ${SUCCESS_COUNT} package(s), failed to sign ${FAIL_COUNT} package(s)"
+            echo "ℹ️  Set repository secrets: SIGNING_CERTIFICATE (base64 .pfx) and SIGNING_CERTIFICATE_PASSWORD"
           else
             echo "✅ All NuGet packages signed successfully"
           fi
