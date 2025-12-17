@@ -27,20 +27,38 @@ jobs:
     
     - name: Validate GitHub Actions workflows
       run: |
+        set -euo pipefail
+
         echo "📋 Installing actionlint for workflow validation..."
         mkdir -p /tmp/actionlint
         cd /tmp/actionlint
+
+        # Download the official installer script and run it
         curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
+
+        # Ensure the binary is executable
         chmod +x ./actionlint
         echo "✅ Actionlint installed"
-        
+
         echo "📝 Validating workflow files..."
-        WORKFLOW_DIR="${{ github.workspace }}/.github/workflows"
-        find "$WORKFLOW_DIR" -maxdepth 1 -name '*.yml' -print0 | xargs -0 /tmp/actionlint/actionlint || {
+        # Assume we're already in the GitHub workspace; if not, uncomment the next line:
+        # cd "$GITHUB_WORKSPACE"
+
+        WORKFLOW_DIR=".github/workflows"
+
+        # Optional: check existence to provide a friendly message
+        if [ ! -d "$WORKFLOW_DIR" ]; then
+          echo "ℹ️ No workflows directory found at $WORKFLOW_DIR. Skipping validation."
+          exit 0
+        fi
+
+        # Run actionlint directly on the workflows directory (recursively)
+        # This covers both .yml and .yaml automatically.
+        if /tmp/actionlint/actionlint -color always "$WORKFLOW_DIR"; then
+          echo "✅ All workflows are syntactically valid"
+        else
           echo "❌ Workflow validation failed"
           exit 1
-        }
-        echo "✅ All workflows are syntactically valid"
 
   scan-dependencies:
     name: Scan for Vulnerable Dependencies
@@ -55,16 +73,26 @@ jobs:
     - name: Detect project type
       id: detect
       run: |
-        if [ -f package.json ]; then
-          echo "project_type=node" >> "$GITHUB_OUTPUT"
-        elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
-          echo "project_type=python" >> "$GITHUB_OUTPUT"
-        elif find . -name "*.csproj" -type f | grep -q .; then
-          echo "project_type=dotnet" >> "$GITHUB_OUTPUT"
-        elif [ -f pom.xml ] || [ -f build.gradle ]; then
-          echo "project_type=java" >> "$GITHUB_OUTPUT"
+        project_type="unknown"
+
+        if [[ -f "package.json" ]]; then
+          project_type="node"
+        elif [[ -f "requirements.txt" || -f "pyproject.toml" ]]; then
+          project_type="python"
+        elif find . -type f -name "*.csproj" -print -quit | grep -q .; then
+          project_type="dotnet"
+        elif find . \
+          -type d \( -name ".git" -o -name "node_modules" -o -name "build" -o -name ".gradle" \) -prune -false -o \
+          -type f \( -name "pom.xml" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
+          -print -quit | grep -q .; then
+          project_type="java"
+        fi
+
+        # Write to GitHub Actions output if available; otherwise print to stdout for local testing
+        if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+          printf "project_type=%s\n" "$project_type" >> "$GITHUB_OUTPUT"
         else
-          echo "project_type=unknown" >> "$GITHUB_OUTPUT"
+          printf "project_type=%s\n" "$project_type"
         fi
 
     # Node.js vulnerability scanning
@@ -118,21 +146,26 @@ jobs:
     - name: Detect project type
       id: detect
       run: |
-        if [ -f package.json ]; then
-          echo "project_type=node" >> "$GITHUB_OUTPUT"
-        elif [ -f requirements.txt ] || [ -f pyproject.toml ]; then
-          echo "project_type=python" >> "$GITHUB_OUTPUT"
-        elif find . -name "*.csproj" -type f | grep -q .; then
-          echo "project_type=dotnet" >> "$GITHUB_OUTPUT"
-        elif [ -f pom.xml ] || [ -f build.gradle ]; then
-          echo "project_type=java" >> "$GITHUB_OUTPUT"
-          if [ -f pom.xml ]; then
-            echo "java_cache=maven" >> "$GITHUB_OUTPUT"
-          else
-            echo "java_cache=gradle" >> "$GITHUB_OUTPUT"
-          fi
+        project_type="unknown"
+
+        if [[ -f "package.json" ]]; then
+          project_type="node"
+        elif [[ -f "requirements.txt" || -f "pyproject.toml" ]]; then
+          project_type="python"
+        elif find . -type f -name "*.csproj" -print -quit | grep -q .; then
+          project_type="dotnet"
+        elif find . \
+          -type d \( -name ".git" -o -name "node_modules" -o -name "build" -o -name ".gradle" \) -prune -false -o \
+          -type f \( -name "pom.xml" -o -name "build.gradle" -o -name "build.gradle.kts" \) \
+          -print -quit | grep -q .; then
+          project_type="java"
+        fi
+
+        # Write to GitHub Actions output if available; otherwise print to stdout for local testing
+        if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+          printf "project_type=%s\n" "$project_type" >> "$GITHUB_OUTPUT"
         else
-          echo "project_type=unknown" >> "$GITHUB_OUTPUT"
+          printf "project_type=%s\n" "$project_type"
         fi
 
     # =============== Node.js ===============
@@ -189,120 +222,242 @@ jobs:
     # =============== Install Dependencies ===============
     - name: Install dependencies
       run: |
+        set -euo pipefail
+
+        # Optional: echo the detected project type for diagnostics
+        echo "Detected project type: '${{ steps.detect.outputs.project_type }}'"
+
+        # Small helper for friendly errors
+        die() { echo "❌ Error: $*" >&2; exit 1; }
+
+        # Check tool availability function
+        need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not found in PATH"; }
+
         case "${{ steps.detect.outputs.project_type }}" in
           node)
-            if [ ! -f package.json ]; then
-              echo "❌ Error: package.json not found but detected as Node.js project"
-              exit 1
+            need npm
+            if [[ ! -f "package.json" ]]; then
+              die "package.json not found but project type is 'node'"
             fi
+            # Use CI-appropriate install; respects package-lock/yarn.lock if applicable
             npm ci
             ;;
+
           python)
-            if [ ! -f requirements.txt ] && [ ! -f pyproject.toml ] && [ ! -f setup.py ] && [ ! -f poetry.lock ]; then
-              echo "❌ Error: No Python dependency file found (requirements.txt, pyproject.toml, setup.py, or poetry.lock required)"
-              exit 1
+            need python
+            need pip
+
+            has_req=false
+            has_pyproj=false
+            has_setup=false
+            has_poetry=false
+
+            [[ -f "requirements.txt" ]] && has_req=true
+            [[ -f "pyproject.toml" ]] && has_pyproj=true
+            [[ -f "setup.py" ]] && has_setup=true
+            [[ -f "poetry.lock" ]] && has_poetry=true
+
+            if [[ "$has_req" == false && "$has_pyproj" == false && "$has_setup" == false && "$has_poetry" == false ]]; then
+              die "No Python dependency file found (expected one of: requirements.txt, pyproject.toml, setup.py, poetry.lock)"
             fi
-            pip install -r requirements.txt 2>/dev/null || pip install -e . || {
-              echo "❌ Error: Failed to install Python dependencies"
-              exit 1
-            }
+
+            # Prefer Poetry when detected
+            if [[ "$has_poetry" == true || ( "$has_pyproj" == true && $(grep -Eiq '^\[tool\.poetry\]' pyproject.toml && echo yes || echo no) == "yes" ) ]]; then
+              if ! command -v poetry >/dev/null 2>&1; then
+                echo "ℹ️ Poetry not found; attempting to install locally (pip)"
+                pip install --user poetry || die "Failed to install Poetry"
+                export PATH="$HOME/.local/bin:$PATH"
+              fi
+              poetry --version >/dev/null || die "Poetry installation unusable"
+              # Install project deps; skip building the project itself if you prefer
+              poetry install --no-interaction
+            elif [[ "$has_req" == true ]]; then
+              pip install -r requirements.txt
+            elif [[ "$has_setup" == true || "$has_pyproj" == true ]]; then
+              # PEP 517/518 or legacy setup.py
+              # Use editable if you need live code changes; otherwise prefer a regular install
+              pip install .
+            else
+              die "Could not determine a Python install strategy"
+            fi
             ;;
+
           dotnet)
-            if ! find . -name "*.csproj" -type f | grep -q .; then
-              echo "❌ Error: No .csproj files found but detected as .NET project"
-              exit 1
+            need dotnet
+            if ! find . -type f -name "*.csproj" | grep -q .; then
+              die "No .csproj files found but project type is 'dotnet'"
             fi
-            dotnet restore
+            dotnet restore --nologo
             ;;
+
           java)
-            if [ ! -f pom.xml ] && [ ! -f build.gradle ]; then
-              echo "❌ Error: No pom.xml or build.gradle found but detected as Java project"
-              exit 1
-            fi
-            if [ -f pom.xml ]; then
-              mvn dependency:go-offline
-            elif [ -f build.gradle ]; then
-              ./gradlew dependencies || gradle dependencies
+            if [[ -f "pom.xml" ]]; then
+              need mvn
+              mvn -B -ntp dependency:go-offline
+            elif [[ -f "build.gradle" || -f "settings.gradle" || -f "build.gradle.kts" || -f "settings.gradle.kts" ]]; then
+              if [[ -x "./gradlew" ]]; then
+                ./gradlew build --no-daemon --refresh-dependencies
+              else
+                need gradle
+                gradle build --no-daemon --refresh-dependencies
+              fi
+            else
+              die "No pom.xml or Gradle build files found but project type is 'java'"
             fi
             ;;
+
           *)
-            echo "❌ Error: Unknown project type"
-            exit 1
+            die "Unknown project type '${{ steps.detect.outputs.project_type }}'"
             ;;
         esac
+
+        echo "✅ Dependency setup completed."
 
     # =============== Build ===============
     - name: Build
       run: |
-        case "${{ steps.detect.outputs.project_type }}" in
+        set -euo pipefail
+
+        project_type="${{ steps.detect.outputs.project_type :-unknown }}"
+
+        case "$project_type" in
           node)
+            # Build if a "build" script exists
             npm run build --if-present
             ;;
+
           dotnet)
-            dotnet build --no-restore || {
+            # Ensure restore happened earlier, or do it here
+            dotnet restore || {
+              echo "❌ Error: .NET restore failed"
+              exit 1
+            }
+            dotnet build || {
               echo "❌ Error: .NET build failed"
               exit 1
             }
             ;;
+
           java)
+            # Require either Maven (pom.xml) or Gradle (build.gradle)
             if [ ! -f pom.xml ] && [ ! -f build.gradle ]; then
-              echo "❌ Error: No pom.xml or gradlew found for Java project"
+              echo "❌ Error: No pom.xml or build.gradle found for Java project"
               exit 1
             fi
+
             if [ -f pom.xml ]; then
-              mvn compile || {
+              # Compile without tests; adjust goals as needed (e.g., package)
+              mvn -B -DskipTests compile || {
                 echo "❌ Error: Maven compilation failed"
                 exit 1
               }
             elif [ -f build.gradle ]; then
               if [ -f gradlew ]; then
+                # Use wrapper; skip tests in CI builds
                 ./gradlew build -x test || {
                   echo "❌ Error: Gradle build failed"
                   exit 1
                 }
               else
-                echo "❌ Error: build.gradle found but no gradlew wrapper - use gradle wrapper (gradlew)"
+                echo "❌ Error: build.gradle found but no gradlew wrapper."
+                echo "👉 Add the Gradle wrapper: 'gradle wrapper' and commit ./gradlew and wrapper files."
                 exit 1
               fi
             fi
             ;;
-          python|*)
-            echo "ℹ️  No explicit build step required for ${{ steps.detect.outputs.project_type }}"
+
+          python)
+            echo "ℹ️  No explicit build step required for python"
+            ;;
+
+          *)
+            echo "ℹ️  No explicit build step required for '$project_type'"
             ;;
         esac
 
     # =============== Run Tests ===============
     - name: Run tests
       run: |
-        case "${{ steps.detect.outputs.project_type }}" in
+        set -euo pipefail
+
+        PROJECT_TYPE="${PROJECT_TYPE:-}"
+
+        if [[ -z "$PROJECT_TYPE" ]]; then
+          echo "❌ Error: PROJECT_TYPE is empty or not set."
+          exit 1
+        fi
+
+        echo "ℹ️  Detected project type: $PROJECT_TYPE"
+
+        case "$PROJECT_TYPE" in
           node)
-            if [ ! -f package.json ]; then
+            # Ensure Node project structure
+            if [[ ! -f package.json ]]; then
               echo "❌ Error: package.json not found for Node.js tests"
               exit 1
             fi
+            # Optional: ensure npm available
+            if ! command -v npm >/dev/null 2>&1; then
+              echo "❌ Error: npm not found in PATH"
+              exit 1
+            fi
+
+            echo "▶️  Running npm test"
             npm test || {
               echo "❌ Error: Node.js tests failed"
               exit 1
             }
             ;;
+
           python)
+            # Optional: ensure Python available
+            if ! command -v python >/dev/null 2>&1; then
+              echo "❌ Error: python not found in PATH"
+              exit 1
+            fi
+
             # Validate test configuration exists
-            if [ ! -f pytest.ini ] && [ ! -f setup.cfg ] && [ ! -f pyproject.toml ] && [ ! -f "tests/__init__.py" ] && [ ! -d tests ]; then
+            if [[ ! -f pytest.ini ]] && [[ ! -f setup.cfg ]] && \
+              [[ ! -f pyproject.toml ]] && [[ ! -f "tests/__init__.py" ]] && \
+              [[ ! -d tests ]]; then
               echo "⚠️  Warning: No pytest/unittest configuration found. Tests are required for production projects."
-              echo "Create one of: pytest.ini, setup.cfg, pyproject.toml, or tests/ directory"
-              # Try to run tests anyway
-              python -m pytest 2>/dev/null || python -m unittest discover 2>/dev/null || {
-                echo "❌ Error: No tests found. Please add tests to your Python project."
-                exit 1
-              }
+              echo "   Create one of: pytest.ini, setup.cfg, pyproject.toml, or tests/ directory"
+
+              echo "▶️  Attempting to run tests anyway (pytest, then unittest)"
+              if command -v pytest >/dev/null 2>&1; then
+                python -m pytest || {
+                  echo "❌ Error: No tests found or pytest failed. Please add tests to your Python project."
+                  exit 1
+                }
+              else
+                python -m unittest discover || {
+                  echo "❌ Error: No tests found. Please add tests to your Python project."
+                  exit 1
+                }
+              fi
             else
-              python -m pytest 2>/dev/null || python -m unittest discover || {
-                echo "❌ Error: Python tests failed"
-                exit 1
-              }
+              echo "▶️  Running Python tests"
+              if command -v pytest >/dev/null 2>&1; then
+                python -m pytest || {
+                  echo "❌ Error: Python tests failed"
+                  exit 1
+                }
+              else
+                python -m unittest discover || {
+                  echo "❌ Error: Python tests failed"
+                  exit 1
+                }
+              fi
             fi
             ;;
+
           dotnet)
+            if ! command -v dotnet >/dev/null 2>&1; then
+              echo "❌ Error: dotnet SDK not found in PATH"
+              exit 1
+            fi
+
+            echo "▶️  Running dotnet test with coverage"
             dotnet test --no-build --verbosity normal \
               --logger "trx;LogFileName=test-results.trx" \
               --collect:"XPlat Code Coverage" \
@@ -311,33 +466,56 @@ jobs:
               exit 1
             }
             ;;
+
           java)
-            if [ ! -f pom.xml ] && [ ! -f build.gradle ]; then
+            # Detect build tool
+            if [[ ! -f pom.xml ]] && [[ ! -f build.gradle ]]; then
               echo "❌ Error: No pom.xml or build.gradle found for Java tests"
               exit 1
             fi
-            if [ -f pom.xml ]; then
-              mvn test || {
+
+            if [[ -f pom.xml ]]; then
+              if ! command -v mvn >/dev/null 2>&1; then
+                echo "❌ Error: Maven (mvn) not found in PATH"
+                exit 1
+              fi
+
+              echo "▶️  Running Maven tests"
+              mvn -q -B test || {
                 echo "❌ Error: Maven tests failed"
                 exit 1
               }
-            elif [ -f build.gradle ]; then
-              if [ -f gradlew ]; then
+            elif [[ -f build.gradle ]]; then
+              if [[ -x ./gradlew ]]; then
+                echo "▶️  Running Gradle wrapper tests"
                 ./gradlew test || {
                   echo "❌ Error: Gradle tests failed"
                   exit 1
                 }
               else
-                echo "❌ Error: build.gradle found but no gradlew wrapper - use gradle wrapper"
-                exit 1
+                # Using system gradle is possible, but wrapper is recommended
+                if command -v gradle >/dev/null 2>&1; then
+                  echo "⚠️  Warning: gradle wrapper not found; using system gradle"
+                  gradle test || {
+                    echo "❌ Error: Gradle tests failed"
+                    exit 1
+                  }
+                else
+                  echo "❌ Error: build.gradle found but no gradlew wrapper and gradle not installed – use Gradle wrapper"
+                  exit 1
+                }
               fi
             fi
             ;;
+
           *)
-            echo "❌ Error: No test command defined for project type"
+            echo "❌ Error: No test command defined for project type: '$PROJECT_TYPE'"
             exit 1
             ;;
         esac
+
+        echo "✅ Tests completed successfully for: $PROJECT_TYPE"
+
 
     # =============== Upload Test Results ===============
     - name: Upload .NET test results

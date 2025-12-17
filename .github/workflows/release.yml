@@ -327,7 +327,6 @@ jobs:
                   version_elem = property_group.find('.//Version')
                   if version_elem is not None:
                       version_elem.text = version
-                      print(f"✅ Updated Version in {csproj_file} to {version}")
                   
                   # Update AssemblyVersion element if present
                   assembly_version_elem = property_group.find('.//AssemblyVersion')
