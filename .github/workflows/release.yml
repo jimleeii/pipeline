@@ -45,7 +45,7 @@ jobs:
     name: Validate Release
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     # Condition: Run for manual releases OR successful CI completions
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
@@ -154,7 +154,7 @@ jobs:
     name: Detect Active Languages
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     outputs:
       languages: ${{ steps.detect.outputs.languages }}
@@ -240,7 +240,7 @@ jobs:
       fail-fast: false
       matrix:
         language: ${{ fromJson(needs.detect-languages.outputs.languages) }}
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -509,8 +509,8 @@ jobs:
         shell: bash
         run: |
           VERSION="${{ steps.dotnet-version.outputs.version }}"
-          dotnet build --configuration Release --no-restore /p:ContinuousIntegrationBuild=true \
-            /p:Version=$VERSION /p:AssemblyVersion=$VERSION /p:FileVersion=$VERSION /p:InformationalVersion=$VERSION
+          dotnet build --configuration Release --no-restore -p:ContinuousIntegrationBuild=true \
+            -p:Version=$VERSION -p:AssemblyVersion=$VERSION -p:FileVersion=$VERSION -p:InformationalVersion=$VERSION
           
       - name: Build (Java)
         if: ${{ matrix.language == 'java' && steps.detect.outputs.java_present == 'true' }}
@@ -771,7 +771,7 @@ jobs:
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
         uses: actions/upload-artifact@v4
         with:
-          name: nuget-packages-${{ steps.dotnet-version.outputs.version }}
+          name: nuget-packages-${{ steps.dotnet-version.outputs.version }}-${{ matrix.os }}
           path: ./packages/*.nupkg
           retention-days: 30
           if-no-files-found: warn
@@ -812,7 +812,7 @@ jobs:
     needs: [validate, release]
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     if: ${{ github.event.inputs.dry_run != 'true' && needs.validate.outputs.version_found == 'true' }}
     steps:
@@ -939,7 +939,7 @@ jobs:
     name: Handle Release Failure
     strategy:
       matrix:
-        os: [ubuntu-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     needs: [validate, release]
     if: ${{ failure() && github.event.inputs.dry_run != 'true' && needs.validate.outputs.version_found == 'true' }}
