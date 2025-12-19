@@ -43,7 +43,10 @@ env:
 jobs:
   validate:
     name: Validate Release
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     # Condition: Run for manual releases OR successful CI completions
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     outputs:
@@ -147,7 +150,10 @@ jobs:
 
   detect-languages:
     name: Detect Active Languages
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     outputs:
       languages: ${{ steps.detect.outputs.languages }}
       has-languages: ${{ steps.detect.outputs.has-languages }}
@@ -224,13 +230,14 @@ jobs:
   release:
     name: Release (${{ matrix.language }})
     needs: [validate, detect-languages]
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     if: ${{ needs.detect-languages.outputs.has-languages == 'true' }}
     strategy:
       fail-fast: false
       matrix:
         language: ${{ fromJson(needs.detect-languages.outputs.languages) }}
+        os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -783,7 +790,10 @@ jobs:
   create-release:
     name: Create GitHub Release
     needs: [validate, release]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     if: ${{ github.event.inputs.dry_run != 'true' && needs.validate.outputs.version_found == 'true' }}
     steps:
       - name: Checkout code
@@ -905,7 +915,10 @@ jobs:
 
   handle-release-failure:
     name: Handle Release Failure
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     needs: [validate, release]
     if: ${{ failure() && github.event.inputs.dry_run != 'true' && needs.validate.outputs.version_found == 'true' }}
     steps:

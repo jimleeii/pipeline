@@ -20,7 +20,10 @@ env:
 jobs:
   validate-workflows:
     name: Validate Workflow Syntax
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -62,7 +65,10 @@ jobs:
 
   scan-dependencies:
     name: Scan for Vulnerable Dependencies
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     permissions:
       contents: read
       security-events: write
@@ -136,7 +142,10 @@ jobs:
   build-test:
     name: Build and Test
     needs: [validate-workflows, scan-dependencies]
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
     - name: Checkout code

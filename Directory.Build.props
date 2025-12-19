@@ -1,0 +1,18 @@
+<Project>
+  <!-- Global configuration for all projects in the solution -->
+  
+  <PropertyGroup>
+    <!-- Target .NET 10.0 globally -->
+    <TargetFramework>net10.0</TargetFramework>
+    
+    <!-- Common language features -->
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    
+    <!-- Version properties (can be overridden by individual projects) -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0</AssemblyVersion>
+    <FileVersion>1.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+  </PropertyGroup>
+</Project>
