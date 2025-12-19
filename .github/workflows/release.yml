@@ -61,6 +61,7 @@ jobs:
 
       - name: Validate and determine version
         id: version
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -139,6 +140,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Check for duplicate release
+        shell: bash
         run: |
           VERSION="${{ steps.version.outputs.version }}"
 
@@ -163,6 +165,7 @@ jobs:
 
       - name: Detect active languages
         id: detect
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -246,6 +249,7 @@ jobs:
 
       - name: Detect project types
         id: detect
+        shell: bash
         run: |
           # Fail fast & be strict
           set -euo pipefail
@@ -301,6 +305,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Set version environment variable
+        shell: bash
         run: |
           {
             echo "VERSION=${{ needs.validate.outputs.version }}"
@@ -329,12 +334,14 @@ jobs:
 
       - name: Restore .NET dependencies
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
+        shell: bash
         run: dotnet restore
 
       # Calculate build version for .NET
       - name: Calculate .NET version
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
         id: dotnet-version
+        shell: bash
         run: |
           BUILD_NUMBER=${{ github.run_number }}
           VERSION="${{ env.RELEASE_VERSION }}.$BUILD_NUMBER"
@@ -352,6 +359,7 @@ jobs:
       # === .NET: Update all version numbers ===
       - name: Update .NET project versions
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
+        shell: bash
         run: |
           # Strict mode for bash
           set -euo pipefail
@@ -482,6 +490,7 @@ jobs:
       # === Build ===
       - name: Build (Node.js)
         if: ${{ matrix.language == 'node' && steps.detect.outputs.node_present == 'true' }}
+        shell: bash
         run: |
           npm ci
           npm run build --if-present
@@ -490,12 +499,14 @@ jobs:
 
       - name: Build (Python)
         if: ${{ matrix.language == 'python' && steps.detect.outputs.python_present == 'true' }}
+        shell: bash
         run: |
           pip install --upgrade pip build wheel
           python -m build
 
       - name: Build (.NET)
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
+        shell: bash
         run: |
           VERSION="${{ steps.dotnet-version.outputs.version }}"
           dotnet build --configuration Release --no-restore /p:ContinuousIntegrationBuild=true \
@@ -503,6 +514,7 @@ jobs:
           
       - name: Build (Java)
         if: ${{ matrix.language == 'java' && steps.detect.outputs.java_present == 'true' }}
+        shell: bash
         run: |
           if [ -f "gradlew" ]; then
             ./gradlew build
@@ -516,11 +528,13 @@ jobs:
       # === Test ===
       - name: Test (Node.js)
         if: ${{ matrix.language == 'node' && steps.detect.outputs.node_present == 'true' }}
+        shell: bash
         run: npm test -- --ci --coverage
         continue-on-error: false
 
       - name: Test (Python)
         if: ${{ matrix.language == 'python' && steps.detect.outputs.python_present == 'true' }}
+        shell: bash
         run: |
           pip install pytest pytest-cov
           python -m pytest --cov --cov-report=xml --cov-report=term
@@ -528,6 +542,7 @@ jobs:
 
       - name: Test (.NET)
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
+        shell: bash
         run: |
           dotnet test --configuration Release --no-build --verbosity normal \
             --collect:"XPlat Code Coverage" --results-directory ./coverage
@@ -535,6 +550,7 @@ jobs:
 
       - name: Test (Java)
         if: ${{ matrix.language == 'java' && steps.detect.outputs.java_present == 'true' }}
+        shell: bash
         run: |
           if [ -f "gradlew" ]; then
             ./gradlew test
@@ -545,6 +561,7 @@ jobs:
 
       - name: Package (.NET for NuGet)
         if: ${{ matrix.language == 'dotnet' && steps.detect.outputs.dotnet_present == 'true' }}
+        shell: bash
         run: |
           dotnet pack --configuration Release --no-build \
             -p:PackageVersion=${{ steps.dotnet-version.outputs.version }} \
@@ -558,6 +575,7 @@ jobs:
         env:
           SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        shell: bash
         run: |
           if [ -n "$SIGNING_CERTIFICATE" ] && [ -n "$SIGNING_CERTIFICATE_PASSWORD" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
@@ -571,6 +589,7 @@ jobs:
         env:
           SIGNING_CERTIFICATE: ${{ secrets.SIGNING_CERTIFICATE }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -676,6 +695,7 @@ jobs:
         id: docker-hub-check
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        shell: bash
         run: |
           if [ -n "$DOCKERHUB_USERNAME" ]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
@@ -808,6 +828,7 @@ jobs:
 
       - name: Generate changelog
         id: changelog
+        shell: bash
         run: |
           set -euo pipefail
 
@@ -894,6 +915,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Publish release summary
+        shell: bash
         run: |
           cat >> "$GITHUB_STEP_SUMMARY" << EOF
           # 🎉 Release v${{ needs.validate.outputs.version }} Published

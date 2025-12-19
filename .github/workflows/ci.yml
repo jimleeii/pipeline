@@ -106,6 +106,7 @@ jobs:
     # Node.js vulnerability scanning
     - name: Run npm audit (Node.js)
       if: ${{ steps.detect.outputs.project_type == 'node' }}
+      shell: bash
       run: |
         echo "🔍 Scanning Node.js dependencies for vulnerabilities..."
         npm audit --audit-level=moderate || {
@@ -116,6 +117,7 @@ jobs:
     # Python vulnerability scanning
     - name: Run pip-audit (Python)
       if: ${{ steps.detect.outputs.project_type == 'python' }}
+      shell: bash
       run: |
         echo "🔍 Scanning Python dependencies for vulnerabilities..."
         pip install pip-audit > /dev/null 2>&1
@@ -124,6 +126,7 @@ jobs:
     # .NET vulnerability scanning
     - name: Run dotnet list package (dotnet)
       if: ${{ steps.detect.outputs.project_type == 'dotnet' }}
+      shell: bash
       run: |
         echo "🔍 Scanning .NET dependencies for vulnerabilities..."
         dotnet tool install --global dotnet-outdated-tool > /dev/null 2>&1 || true
@@ -156,6 +159,7 @@ jobs:
     # Detect project type
     - name: Detect project type
       id: detect
+      shell: bash
       run: |
         project_type="unknown"
 
@@ -232,6 +236,7 @@ jobs:
 
     # =============== Install Dependencies ===============
     - name: Install dependencies
+      shell: bash
       run: |
         set -euo pipefail
 
@@ -326,6 +331,7 @@ jobs:
 
     # =============== Build ===============
     - name: Build
+      shell: bash
       run: |
         set -euo pipefail
 
@@ -388,6 +394,7 @@ jobs:
 
     # =============== Run Tests ===============
     - name: Run tests
+      shell: bash
       run: |
         set -euo pipefail
 
@@ -579,6 +586,7 @@ jobs:
     - name: Check for test report files
       if: always()
       id: check-test-files
+      shell: bash
       run: |
         set -euo pipefail
 
