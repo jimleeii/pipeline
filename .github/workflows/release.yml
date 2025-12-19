@@ -45,7 +45,7 @@ jobs:
     name: Validate Release
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     # Condition: Run for manual releases OR successful CI completions
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
@@ -154,7 +154,7 @@ jobs:
     name: Detect Active Languages
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     outputs:
       languages: ${{ steps.detect.outputs.languages }}
@@ -240,7 +240,7 @@ jobs:
       fail-fast: false
       matrix:
         language: ${{ fromJson(needs.detect-languages.outputs.languages) }}
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -812,7 +812,7 @@ jobs:
     needs: [validate, release]
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     if: ${{ github.event.inputs.dry_run != 'true' && needs.validate.outputs.version_found == 'true' }}
     steps:
@@ -939,7 +939,7 @@ jobs:
     name: Handle Release Failure
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     needs: [validate, release]
     if: ${{ failure() && github.event.inputs.dry_run != 'true' && needs.validate.outputs.version_found == 'true' }}
